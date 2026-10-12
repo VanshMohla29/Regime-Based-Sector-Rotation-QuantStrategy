@@ -829,6 +829,10 @@ def engineer_features(df):
     #     NOT selected by select_features_for_hmm (available for testing only).
     if 'NIFTY_EqWt' in df.columns:
         feat['Nifty_EqWt/Nifty50'] = df['NIFTY_EqWt'] / df['NIFTY']
+        eq_ret_1d = df['NIFTY_EqWt'].pct_change()
+        nifty_ret_1d = df['NIFTY'].pct_change()
+        ret_ratio = (eq_ret_1d / nifty_ret_1d).replace([np.inf, -np.inf], np.nan).ffill()
+        feat['Nifty_EqWt_1d_ret/Nifty_1d_ret'] = ret_ratio
     clean = feat.dropna()
     print(f"✓ Engineered {clean.shape[1]} features, {len(clean)} clean rows")
     return clean
