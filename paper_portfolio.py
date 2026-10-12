@@ -452,6 +452,9 @@ def engineer_features(df):
     feat['wpi_yoy']     = df['WPI']
     feat['real_rate']   = (df['RealRate'] - df['RealRate'].shift(252)).bfill()
 
+    if 'NIFTY_EqWt' in df.columns:
+        feat['Nifty_EqWt/Nifty50'] = df['NIFTY_EqWt'] / df['NIFTY']
+
     clean = feat.dropna()
     return clean
 
