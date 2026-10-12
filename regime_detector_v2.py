@@ -510,91 +510,91 @@ def impute_macro_signals(df):
     return df
 
 
-# Point-in-time NIFTY 50 membership history (binary matrix: date x stock, 1 = in the index from that date).
-# Source: github.com/vishalvx/nifty-indices-datasets (MIT), reconstructed from NSE Indices press releases.
-# The file ends at 2025-08-31, so the later reconstitution is applied below as explicit events.
-NIFTY50_HISTORY_CSV = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'nifty50_constituents_history.csv')
+# # Point-in-time NIFTY 50 membership history (binary matrix: date x stock, 1 = in the index from that date).
+# # Source: github.com/vishalvx/nifty-indices-datasets (MIT), reconstructed from NSE Indices press releases.
+# # The file ends at 2025-08-31, so the later reconstitution is applied below as explicit events.
+# NIFTY50_HISTORY_CSV = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'nifty50_constituents_history.csv')
 
-# Membership changes after the end of the CSV: (effective date, symbols added, symbols removed).
-# 2025-09 reconstitution: Max Healthcare & InterGlobe Aviation in, IndusInd Bank & Hero MotoCorp out.
-# (The March 2026 review made no constituent changes.)
-NIFTY50_POST_CSV_EVENTS = [
-    ('2025-10-01', ['INDIGO', 'MAXHEALTH'], ['INDUSINDBK', 'HEROMOTOCO']),
-]
+# # Membership changes after the end of the CSV: (effective date, symbols added, symbols removed).
+# # 2025-09 reconstitution: Max Healthcare & InterGlobe Aviation in, IndusInd Bank & Hero MotoCorp out.
+# # (The March 2026 review made no constituent changes.)
+# NIFTY50_POST_CSV_EVENTS = [
+#     ('2025-10-01', ['INDIGO', 'MAXHEALTH'], ['INDUSINDBK', 'HEROMOTOCO']),
+# ]
 
-# Dataset symbol -> current Yahoo Finance ticker (renamed / re-listed companies). Default: '<SYMBOL>.NS'.
-NIFTY50_YAHOO_MAP = {
-    'BAJAJAUTO':  'BAJAJ-AUTO.NS',
-    'TATAMOTORS': 'TMPV.NS',        # passenger-vehicle entity after the Oct-2025 demerger (history carried over)
-    'INFRATEL':   'INDUSTOWER.NS',  # Bharti Infratel -> Indus Towers
-    'IBULHSGFIN': 'SAMMAANCAP.NS',  # Indiabulls Housing Finance -> Sammaan Capital
-    'LTIM':       'LTM.NS',         # LTIMindtree
-}
-
-
-def load_nifty50_membership(index):
-    """
-    Daily point-in-time NIFTY 50 membership matrix (bool, `index` x symbol): True when the stock
-    was an index constituent on that trading day. Row dates in the CSV are the dates from which a
-    composition is valid, so each trading day uses the latest composition dated on or before it.
-    """
-    hist = pd.read_csv(NIFTY50_HISTORY_CSV, parse_dates=['DATE']).set_index('DATE').sort_index()
-    hist = hist.astype(float) > 0.5
-    for eff_date, added, removed in NIFTY50_POST_CSV_EVENTS:
-        eff = pd.Timestamp(eff_date)
-        if eff <= hist.index[-1]:
-            continue
-        for sym in added:
-            if sym not in hist.columns:
-                hist[sym] = False
-        row = hist.iloc[-1].copy()
-        row[list(added)] = True
-        row[list(removed)] = False
-        hist.loc[eff] = row
-        hist = hist.astype(bool)
-    members = hist.reindex(index, method='ffill')
-    return members.fillna(False).astype(bool)
+# # Dataset symbol -> current Yahoo Finance ticker (renamed / re-listed companies). Default: '<SYMBOL>.NS'.
+# NIFTY50_YAHOO_MAP = {
+#     'BAJAJAUTO':  'BAJAJ-AUTO.NS',
+#     'TATAMOTORS': 'TMPV.NS',        # passenger-vehicle entity after the Oct-2025 demerger (history carried over)
+#     'INFRATEL':   'INDUSTOWER.NS',  # Bharti Infratel -> Indus Towers
+#     'IBULHSGFIN': 'SAMMAANCAP.NS',  # Indiabulls Housing Finance -> Sammaan Capital
+#     'LTIM':       'LTM.NS',         # LTIMindtree
+# }
 
 
-def fetch_nifty_equal_weight(index, nifty, start_date="2015-01-01"):
-    """
-    Builds the NIFTY 50 Equal-Weight index from point-in-time constituents: on every day each stock
-    that was in the NIFTY 50 *on that day* gets an equal (2% = 1/50) weight, rebalanced daily.
-    No look-ahead and no survivorship bias in the membership. Rebased to equal NIFTY 50 on the first
-    day, so the ratio Nifty_EqWt/Nifty50 starts at 1.0 and rises when the average stock outperforms
-    the cap-weighted index (broad participation) and falls when mega-caps lead.
+# def load_nifty50_membership(index):
+#     """
+#     Daily point-in-time NIFTY 50 membership matrix (bool, `index` x symbol): True when the stock
+#     was an index constituent on that trading day. Row dates in the CSV are the dates from which a
+#     composition is valid, so each trading day uses the latest composition dated on or before it.
+#     """
+#     hist = pd.read_csv(NIFTY50_HISTORY_CSV, parse_dates=['DATE']).set_index('DATE').sort_index()
+#     hist = hist.astype(float) > 0.5
+#     for eff_date, added, removed in NIFTY50_POST_CSV_EVENTS:
+#         eff = pd.Timestamp(eff_date)
+#         if eff <= hist.index[-1]:
+#             continue
+#         for sym in added:
+#             if sym not in hist.columns:
+#                 hist[sym] = False
+#         row = hist.iloc[-1].copy()
+#         row[list(added)] = True
+#         row[list(removed)] = False
+#         hist.loc[eff] = row
+#         hist = hist.astype(bool)
+#     members = hist.reindex(index, method='ffill')
+#     return members.fillna(False).astype(bool)
 
-    Limitation: Yahoo Finance has no prices for some delisted former members (HDFC Ltd, IDFC, Cairn).
-    On days they were constituents, the weight is shared equally among the remaining members that
-    have prices (coverage is printed). Returns a Series aligned to `index`, or None on failure.
-    """
-    try:
-        members = load_nifty50_membership(index)
-        symbols = [s for s in members.columns if members[s].any()]
-        yahoo = {s: NIFTY50_YAHOO_MAP.get(s, f"{s}.NS") for s in symbols}
-        raw = yf.download(list(yahoo.values()), start=start_date, auto_adjust=True, progress=False)['Close']
-        raw = raw.dropna(axis=1, how='all')
-        px = pd.DataFrame({s: raw[t] for s, t in yahoo.items() if t in raw.columns})
-        # bridge isolated missing prints so a one-day gap does not create a fake jump
-        ret = px.ffill(limit=5).pct_change(fill_method=None).reindex(index)
-        mem = members[px.columns]
-        active = mem & ret.notna()                       # constituent that day AND has a price return
-        eq_ret = ret.where(active).mean(axis=1).fillna(0.0)
-        eq_idx = (1.0 + eq_ret).cumprod()
-        eq_idx = eq_idx / eq_idx.iloc[0] * nifty.iloc[0]
 
-        n_members = members.sum(axis=1)
-        coverage = active.sum(axis=1) / n_members.replace(0, np.nan)
-        missing = sorted(set(symbols) - set(px.columns))
-        print(f"  ✓ NIFTY 50 Equal-Weight index built from point-in-time constituents "
-              f"({len(px.columns)} stocks over time, avg {coverage.mean()*100:.0f}% of members priced, "
-              f"min {coverage.min()*100:.0f}%)")
-        if missing:
-            print(f"    No Yahoo price history for former members: {', '.join(missing)}")
-        return eq_idx
-    except Exception as e:
-        print(f"  ⚠ NIFTY 50 Equal-Weight index unavailable: {e}")
-        return None
+# def fetch_nifty_equal_weight(index, nifty, start_date="2015-01-01"):
+#     """
+#     Builds the NIFTY 50 Equal-Weight index from point-in-time constituents: on every day each stock
+#     that was in the NIFTY 50 *on that day* gets an equal (2% = 1/50) weight, rebalanced daily.
+#     No look-ahead and no survivorship bias in the membership. Rebased to equal NIFTY 50 on the first
+#     day, so the ratio Nifty_EqWt/Nifty50 starts at 1.0 and rises when the average stock outperforms
+#     the cap-weighted index (broad participation) and falls when mega-caps lead.
+
+#     Limitation: Yahoo Finance has no prices for some delisted former members (HDFC Ltd, IDFC, Cairn).
+#     On days they were constituents, the weight is shared equally among the remaining members that
+#     have prices (coverage is printed). Returns a Series aligned to `index`, or None on failure.
+#     """
+#     try:
+#         members = load_nifty50_membership(index)
+#         symbols = [s for s in members.columns if members[s].any()]
+#         yahoo = {s: NIFTY50_YAHOO_MAP.get(s, f"{s}.NS") for s in symbols}
+#         raw = yf.download(list(yahoo.values()), start=start_date, auto_adjust=True, progress=False)['Close']
+#         raw = raw.dropna(axis=1, how='all')
+#         px = pd.DataFrame({s: raw[t] for s, t in yahoo.items() if t in raw.columns})
+#         # bridge isolated missing prints so a one-day gap does not create a fake jump
+#         ret = px.ffill(limit=5).pct_change(fill_method=None).reindex(index)
+#         mem = members[px.columns]
+#         active = mem & ret.notna()                       # constituent that day AND has a price return
+#         eq_ret = ret.where(active).mean(axis=1).fillna(0.0)
+#         eq_idx = (1.0 + eq_ret).cumprod()
+#         eq_idx = eq_idx / eq_idx.iloc[0] * nifty.iloc[0]
+
+#         n_members = members.sum(axis=1)
+#         coverage = active.sum(axis=1) / n_members.replace(0, np.nan)
+#         missing = sorted(set(symbols) - set(px.columns))
+#         print(f"  ✓ NIFTY 50 Equal-Weight index built from point-in-time constituents "
+#               f"({len(px.columns)} stocks over time, avg {coverage.mean()*100:.0f}% of members priced, "
+#               f"min {coverage.min()*100:.0f}%)")
+#         if missing:
+#             print(f"    No Yahoo price history for former members: {', '.join(missing)}")
+#         return eq_idx
+#     except Exception as e:
+#         print(f"  ⚠ NIFTY 50 Equal-Weight index unavailable: {e}")
+#         return None
 
 
 def fetch_live_market_data(start_date="2015-01-01"):
@@ -619,10 +619,10 @@ def fetch_live_market_data(start_date="2015-01-01"):
     df['VIX']      = close['^INDIAVIX'].ffill().bfill()
     df.dropna(subset=['NIFTY', 'Returns'], inplace=True)
 
-    # ── NIFTY 50 Equal-Weight index (2% per stock) — engineered feature only, not used by the HMM ──
-    eq_wt = fetch_nifty_equal_weight(df.index, df['NIFTY'], start_date=start_date)
-    if eq_wt is not None:
-        df['NIFTY_EqWt'] = eq_wt
+    # # ── NIFTY 50 Equal-Weight index (2% per stock) — engineered feature only, not used by the HMM ──
+    # eq_wt = fetch_nifty_equal_weight(df.index, df['NIFTY'], start_date=start_date)
+    # if eq_wt is not None:
+    #     df['NIFTY_EqWt'] = eq_wt
 
     
     # ── Official India Macro & Yield Feeds (MoSPI + RBI + FRED) ──
@@ -824,15 +824,15 @@ def engineer_features(df):
     feat['wpi_yoy']     = df['WPI']
     feat['real_rate']   = (df['RealRate'] - df['RealRate'].shift(252)).bfill()
 
-    # 10. Market breadth: NIFTY 50 Equal-Weight (2% per stock) / cap-weighted NIFTY 50
-    #     >1 and rising -> broad participation; falling -> mega-cap led market.
-    #     NOT selected by select_features_for_hmm (available for testing only).
-    if 'NIFTY_EqWt' in df.columns:
-        feat['Nifty_EqWt/Nifty50'] = df['NIFTY_EqWt'] / df['NIFTY']
-        eq_ret_1d = df['NIFTY_EqWt'].pct_change()
-        nifty_ret_1d = df['NIFTY'].pct_change()
-        ret_ratio = (eq_ret_1d / nifty_ret_1d).replace([np.inf, -np.inf], np.nan).ffill()
-        feat['Nifty_EqWt_1d_ret/Nifty_1d_ret'] = ret_ratio
+    # # 10. Market breadth: NIFTY 50 Equal-Weight (2% per stock) / cap-weighted NIFTY 50
+    # #     >1 and rising -> broad participation; falling -> mega-cap led market.
+    # #     NOT selected by select_features_for_hmm (available for testing only).
+    # if 'NIFTY_EqWt' in df.columns:
+    #     feat['Nifty_EqWt/Nifty50'] = df['NIFTY_EqWt'] / df['NIFTY']
+    #     eq_ret_1d = df['NIFTY_EqWt'].pct_change()
+    #     nifty_ret_1d = df['NIFTY'].pct_change()
+    #     ret_ratio = (eq_ret_1d / nifty_ret_1d).replace([np.inf, -np.inf], np.nan).ffill()
+    #     feat['Nifty_EqWt_1d_ret/Nifty_1d_ret'] = ret_ratio
     clean = feat.dropna()
     print(f"✓ Engineered {clean.shape[1]} features, {len(clean)} clean rows")
     return clean
