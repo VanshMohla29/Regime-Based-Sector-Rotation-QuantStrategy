@@ -7,29 +7,29 @@
     "regime_min_hold_days": 5
   },
   "baseline_performance": {
-    "sharpe_ratio": 0.95,
-    "annualized_return_pct": 24.94,
+    "sharpe_ratio": 0.872,
+    "annualized_return_pct": 23.17,
     "max_drawdown_pct": -25.02
   },
   "benchmark_nifty_bh": {
-    "sharpe_ratio": 0.255,
-    "annualized_return_pct": 10.65,
+    "sharpe_ratio": 0.26,
+    "annualized_return_pct": 10.73,
     "max_drawdown_pct": -38.44
   },
   "plateau_neighborhood_3x3": {
-    "mean_sharpe": 0.933,
-    "std_sharpe": 0.04,
-    "coefficient_of_variation_pct": 4.32,
-    "min_sharpe": 0.852,
-    "max_sharpe": 0.972
+    "mean_sharpe": 0.844,
+    "std_sharpe": 0.045,
+    "coefficient_of_variation_pct": 5.29,
+    "min_sharpe": 0.767,
+    "max_sharpe": 0.895
   },
   "global_parameter_grid": {
-    "mean_sharpe": 0.93,
-    "std_sharpe": 0.051,
-    "min_sharpe": 0.825,
-    "max_sharpe": 1.083,
-    "coefficient_of_variation_pct": 5.43,
+    "mean_sharpe": 0.844,
+    "std_sharpe": 0.056,
+    "min_sharpe": 0.702,
+    "max_sharpe": 0.993,
+    "coefficient_of_variation_pct": 6.6,
     "pct_combinations_beating_bh": 100.0,
-    "worst_case_outperformance_vs_bh_pct": 223.1
+    "worst_case_outperformance_vs_bh_pct": 170.3
   }
 }
