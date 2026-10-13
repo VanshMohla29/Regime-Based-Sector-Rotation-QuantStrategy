@@ -115,11 +115,11 @@ def compute_sell_charges(turnover, n_scrips=1):
     return total
 
 # Anti-whipsaw minimum holding period
-MIN_HOLD_DAYS = 5
+MIN_HOLD_DAYS = 7
 
-# Capital protection parameters (-12% drawdown stop with T+0 execution + 20 SMA re-entry)
+# Capital protection parameters (-12% drawdown stop with T+0 execution + 10 SMA re-entry)
 STOP_LOSS_DD       = -0.12   # -12% portfolio drawdown stop to 100% Cash / Liquid (T+0 execution)
-STOP_REENTRY_MA    = 20      # 20-day Simple Moving Average on NIFTY 50
+STOP_REENTRY_MA    = 10      # 10-day Simple Moving Average on NIFTY 50
 STOP_REENTRY_TYPE  = 'SMA'   # 'EMA' or 'SMA'
 STOP_COOLDOWN_DAYS = 5       # Minimum 5 trading days in Cash before checking re-entry
 

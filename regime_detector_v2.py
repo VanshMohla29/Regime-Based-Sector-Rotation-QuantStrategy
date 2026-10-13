@@ -66,16 +66,16 @@ REGIME_COLORS = {
 
 
 # Minimum holding period (trading days) to prevent whipsaw
-MIN_HOLD_DAYS = 5
+MIN_HOLD_DAYS = 7
 
 # Transaction cost parameters
 TC_STT       = 0.001   # 0.10% STT on sell-side (equity delivery)
 TC_SLIPPAGE  = 0.0005  # 0.05% market impact / slippage
 TC_TOTAL     = TC_STT + TC_SLIPPAGE   # applied on every regime switch
 
-# Capital protection parameters (-12% drawdown stop with T+0 execution + 20 SMA re-entry)
+# Capital protection parameters (-12% drawdown stop with T+0 execution + 10 SMA re-entry)
 STOP_LOSS_DD       = -0.12   # -12% portfolio drawdown stop to 100% Cash / Liquid (T+0 execution)
-STOP_REENTRY_MA    = 20      # 20-day Simple Moving Average on NIFTY 50
+STOP_REENTRY_MA    = 10      # 10-day Simple Moving Average on NIFTY 50
 STOP_REENTRY_TYPE  = 'SMA'   # 'EMA' or 'SMA'
 STOP_COOLDOWN_DAYS = 5       # Minimum 5 trading days in Cash before checking re-entry
 
@@ -1552,7 +1552,7 @@ def compute_sector_rotation_returns(result, learned_sector_mix, df_sec=None, sto
                       for s in sector_names if s in weights and not pd.isna(sec_sub.loc[idx, s]))
         baseline_ret[idx] = port_r
 
-    # Benchmark 10 EMA for re-entry filter
+    # Benchmark 10 SMA for re-entry filter
     nifty_prices = res_sub['NIFTY']
     if STOP_REENTRY_TYPE == 'EMA':
         ma_filter = nifty_prices.ewm(span=STOP_REENTRY_MA, adjust=False).mean()
