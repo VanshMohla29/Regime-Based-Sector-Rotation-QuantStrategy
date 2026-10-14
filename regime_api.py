@@ -74,8 +74,8 @@ class MarketFeatures(BaseModel):
     yield_curve:       float = Field(..., description="10Y - 2Y sovereign yield curve spread (%)")
     cpi_yoy:           float = Field(..., description="Consumer Price Index YoY inflation (%)")
     iip_yoy:           float = Field(..., description="Index of Industrial Production YoY growth (%)")
-    wpi_mom_vs_ma3m:   float = Field(..., description="Wholesale Price Index MoM % change minus 3-month MA surprise (%)")
-    real_rate_mom:     float = Field(..., description="Real policy rate 1-month momentum: 21-day change in Repo Rate - CPI (%)")
+    wpi_yoy:           float = Field(..., description="Wholesale Price Index YoY inflation (%)")
+    real_rate:         float = Field(..., description="Real policy rate momentum: 1-year change in Repo Rate - CPI (%)")
 
 REGIME_EXPOSURE = {
     "Bull":     1.0,
@@ -107,8 +107,8 @@ def predict_regime(features: MarketFeatures):
         features.yield_curve,
         features.cpi_yoy,
         features.iip_yoy,
-        features.wpi_mom_vs_ma3m,
-        features.real_rate_mom,
+        features.wpi_yoy,
+        features.real_rate,
     ]])
 
     scaled = _scaler.transform(raw)

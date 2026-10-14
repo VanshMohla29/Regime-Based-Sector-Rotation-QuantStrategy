@@ -63,8 +63,8 @@ The **India Market Regime Detector (v2)** provides an institutional-grade quanti
 - **11-Signal Feature Space**: Selected via an exhaustive 1,440-combination MoM MA & difference grid search across macroeconomic and market categories. Combines market dynamics (5-day percentage return `ret_5d_pct`, 60-day realized volatility `vol_60d`, long-term structural trend ratio `price_vs_ma200`, peak drawdown `drawdown`, 20-day drawdown change `drawdown_diff20d`, and VIX vs 20-day MA ratio `vix_vs_ma20`) with official macroeconomic fundamentals (10Y-2Y sovereign yield curve spread `yield_curve`, MoSPI CPI inflation `cpi_yoy`, MoSPI IIP industrial growth `iip_yoy`, DPIIT WPI 3-month moving average surprise `wpi_mom_vs_ma3m`, and RBI real policy repo rate 1-month momentum `real_rate_mom`) normalized via non-parametric Gaussian Quantile Transformation.
 - **Dynamic KNN Macro Imputation**: Imputes intermediate macro calendar gaps via `KNNImputer(n_neighbors=5)` anchored strictly on 1-day Return, India VIX, and Drawdown, eliminating lookahead bias while maintaining macroeconomic continuity.
 - **Pure Sector Rotation Strategy**: Allocates capital dynamically across **8 real NSE Sector ETFs** (`BANKBEES`, `ITBEES`, `PHARMABEES`, `AUTOBEES`, `METALIETF`, `MOREALTY`, `CPSEETF`, `INFRABEES`) based on constrained Sharpe-ratio quadratic optimization (SLSQP).
-- **Superior Risk-Adjusted Edge**: Delivers **+30.15% CAGR**, a **1.14 Sharpe ratio**, a **1.58 Sortino ratio**, and a **1.30 Profit Factor** (vs. +11.08% CAGR, 0.28 Sharpe, and 1.13 Profit Factor for the NIFTY 50 Buy & Hold benchmark over 2015 to 2026), generating **+19.07% per year in net alpha** while **capping drawdown during systemic crashes** to **-18.89%** (vs. −38.44% for Buy & Hold during the 2020 COVID crash).
-- **Institutional Capital Protection Architecture**: Implements a strict **-12% portfolio drawdown stop-loss with immediate T+0 execution** (executing as soon as trailing drawdown breaches -12.0%) combined with a **10-day Simple Moving Average (10 SMA)** re-entry filter and a mandatory 7-day cash lockout. During systemic market collapses, the strategy shifts 100% of capital immediately into liquid cash earning the RBI repo rate (5.50% p.a.). By using immediate T+0 stop-loss execution and a disciplined 10-day SMA, the system safely sidestepped systemic market waterfalls while capturing the broad cyclical recovery.
+- **Superior Risk-Adjusted Edge**: Delivers **+27.37% CAGR**, a **1.18 Sharpe ratio**, a **1.63 Sortino ratio**, and a **1.35 Profit Factor** (vs. +11.08% CAGR, 0.28 Sharpe, and 1.13 Profit Factor for the NIFTY 50 Buy & Hold benchmark over 2015 to 2026), generating **+16.29% per year in net alpha** while **capping drawdown during systemic crashes** to **-15.02%** (vs. −38.44% for Buy & Hold during the 2020 COVID crash, a **+23.42% drawdown reduction**).
+- **Institutional Capital Protection Architecture**: Implements a strict **-6% portfolio drawdown stop-loss with immediate T+0 execution** (executing as soon as trailing drawdown breaches -6.0%) combined with a **10-day Simple Moving Average (10 SMA)** re-entry filter and a mandatory 15-day cash cooldown (`STOP_COOLDOWN_DAYS = 15`). During systemic market collapses, the strategy shifts 100% of capital immediately into liquid cash earning the RBI repo rate (5.50% p.a.). By using immediate T+0 stop-loss execution and a disciplined 10-day SMA, the system safely sidestepped systemic market waterfalls while capturing the broad cyclical recovery.
 - **Institutional Bad-Tick Filter**: Real-time outlier filter detects and sanitizes data feed glitches (such as Yahoo Finance's December 2019 decimal shift in `BANKBEES.NS` that previously produced an artificial -63% drawdown).
 - **Zero-Lookahead Walk-Forward Validation**: Eliminates all 6 lookahead leakage vectors (batch Viterbi decoding, retroactive anti-whipsaw smoothing, global sector weights, zero-lag macro publication, contemporaneous execution, and fold label switching). Reports dual out-of-sample metrics across 8 annual cross-cycle folds (2019–2026): **+26.1% mean fold return** (0.71 mean Sharpe, 1.23 mean Profit Factor) alongside true continuous **+18.7% chained OOS CAGR** (0.54 chained Sharpe, 1.16 chained Profit Factor) with only 10.8 switches per fold.
 - **Live Paper Trading Execution Engine (`paper_portfolio.py`)**: Freezes the trained model and runs forward out-of-sample simulation using actual EOD ETF market prices, down-rounding allocations to whole integer units, tracking uninvested cash, and deducting realistic Indian regulatory taxes and charges (STT, exchange turnover, GST, SEBI charges, stamp duty, DP charges, and slippage).
@@ -110,10 +110,10 @@ The **India Market Regime Detector (v2)** provides an institutional-grade quanti
                                          ▼
                         VALIDATION & LIVE FORWARD EXECUTION
   ┌────────────────────────────────────────────────────────────────────────────────────┐
-  │  • Pure Sector Rotation Backtest (+30.15% CAGR, 1.14 Sharpe, 1.30 PF, -18.89% DD)  │
-  │  • Capital Protection Stop (-12% DD T+0 Stop to 100% Cash + 20 SMA NIFTY Re-entry) │
+  │  • Pure Sector Rotation Backtest (+27.37% CAGR, 1.18 Sharpe, 1.35 PF, -15.02% DD)  │
+  │  • Capital Protection Stop (-6% DD T+0 Stop to 100% Cash + 15d Cooldown + 10 SMA)  │
   │  • 8-Fold Causal Walk-Forward Validation (+26.1% Mean OOS, +18.7% Chained CAGR)    │
-  │  • Bootstrap Monte Carlo Confidence Intervals (N=2,000, 90% Sharpe [0.62, 1.64])   │
+  │  • Bootstrap Monte Carlo Confidence Intervals (N=2,000, 90% Sharpe [0.67, 1.70])   │
   │  • Live Paper Trading Engine (Frozen Model, Whole Units, Indian Regulatory Costs)  │
   │  • 10 Publication-Grade Visualizations (Dark Theme Suite, Fig 1 VIX Diff Panel)   │
   │  • Production FastAPI Microservice & Interactive Telegram Bot Interface            │
@@ -190,7 +190,7 @@ Because the model was in the **Sideways** regime on that date (which allocated 4
 To ensure institutional robustness against upstream feed corruption:
 1. `fetch_live_sector_data()` enforces an **automated outlier sanity check** across all 8 sector ETFs.
 2. Any single-day return with absolute magnitude exceeding $\pm 25\%$ (`|r_t| > 0.25`) is flagged as data corruption and automatically sanitized by substituting the daily return of the respective underlying sector proxy (`^NSEBANK`, `^CNXIT`, 3-stock basket, etc.).
-3. With this filter active and the 3-stock sector proxies, the true unhedged baseline maximum drawdown of the strategy matches economic realities, while the automated -12% Stop and 20 SMA re-entry engine caps drawdown at **-18.89%** and lifts strategy Sharpe to **1.14** (vs. -38.44% and 0.28 Sharpe for Buy & Hold).
+3. With this filter active and the 3-stock sector proxies, the true unhedged baseline maximum drawdown of the strategy matches economic realities, while the automated -6% Stop, 15-day cooldown, and 10 SMA re-entry engine caps drawdown at **-15.02%** and lifts strategy Sharpe to **1.18** (vs. -38.44% and 0.28 Sharpe for Buy & Hold).
 
 ---
 
@@ -226,7 +226,7 @@ The 11 active signals in $\mathbf{x}_t$ are:
 10. `wpi_mom_vs_ma3m`: Wholesale Price Index Month-on-Month % change minus its 3-month moving average ($\text{WPI MoM}_t - \text{SMA}_3(\text{WPI MoM})_t$) from DPIIT official index, isolating unexpected short-term supply chain inflation impulses.
 11. `real_rate_mom`: Real policy repo rate 1-month (21-day) momentum: $\text{RealRate}_t - \text{RealRate}_{t-21}$ where $\text{RealRate}_t = \text{RepoRate}_t - \text{CPI}_t$.
 
-> **Feature Selection & Combinatorial Optimization:** The 11-feature combination was selected from an exhaustive 1,440-combination grid search across Moving Average (MA) and Difference (diff) variations of Month-on-Month (MoM) macroeconomic values evaluated over 8 strictly causal walk-forward folds. Ranked #1 globally, this feature set achieved a Chained Out-of-Sample Sharpe ratio of **+0.54** (vs. +0.47 baseline), Chained OOS CAGR of **+18.7%** (vs. +16.7% baseline), Mean OOS Return of **+26.1%** (Sharpe **0.71**), In-Sample CAGR of **+30.15%** (Sharpe **1.14**), and reduced in-sample maximum drawdown to **-18.89%** (vs. -25.96% baseline).
+> **Feature Selection & Combinatorial Optimization:** The 11-feature combination was selected from an exhaustive 1,440-combination grid search across Moving Average (MA) and Difference (diff) variations of Month-on-Month (MoM) macroeconomic values evaluated over 8 strictly causal walk-forward folds. Ranked #1 globally, this feature set achieved a Chained Out-of-Sample Sharpe ratio of **+0.54** (vs. +0.47 baseline), Chained OOS CAGR of **+18.7%** (vs. +16.7% baseline), Mean OOS Return of **+26.1%** (Sharpe **0.71**), In-Sample CAGR of **+27.37%** (Sharpe **1.18**), and reduced in-sample maximum drawdown to **-15.02%** (vs. -38.44% Buy & Hold benchmark).
 
 ### Centroid Anchoring (Eliminating Label Switching)
 
@@ -269,42 +269,42 @@ $$\sum_{i=1}^8 w_{k, i} = 1.0, \quad 0.0 \le w_{k, i} \le 0.40 \quad (\forall i)
 
 ---
 
-### Capital Protection Drawdown Stop & 20-Day SMA Re-entry Architecture
+### Capital Protection Drawdown Stop & 10-Day SMA Re-entry Architecture
 
 While regime classification systematically rotates capital into resilient defensive or value compounders during market downturns, systemic liquidity panics (such as the March 2020 COVID crash) can cause high correlation across all equity sectors. To protect accumulated capital against deep catastrophic drawdowns without introducing arbitrary human discretion, an institutional **Capital Protection Engine** is embedded directly into [`regime_detector_v2.py`](regime_detector_v2.py) and [`paper_portfolio.py`](paper_portfolio.py):
 
 1. **Drawdown Breach Trigger**:
    At the close of each trading session $t$, the portfolio's drawdown from rolling peak equity is monitored:
    $$DD_t = \frac{\text{NAV}_t - \max_{\tau \le t} \text{NAV}_\tau}{\max_{\tau \le t} \text{NAV}_\tau}$$
-   If $DD_t \le -12.0\%$ (`STOP_LOSS_DD = -0.12`), the **T+0 Capital Protection Exit** executes immediately on day $t$.
+   If $DD_t \le -6.0\%$ (`STOP_LOSS_DD = -0.06`), the **T+0 Capital Protection Exit** executes immediately on day $t$.
 2. **Immediate T+0 De-risking to 100% Cash / Liquid**:
-   Execution is immediate (T+0): all equity ETF positions are liquidated on day $t$ as soon as the -12.0% threshold is reached, capping the drawdown at -12.0% (less 17 bps transaction costs: STT, exchange turnover fees, GST, SEBI fees, stamp duty, slippage). The portfolio moves 100% of capital into safe liquid cash reserves earning the daily RBI repo yield ($5.25\% / 252$).
+   Execution is immediate (T+0): all equity ETF positions are liquidated on day $t$ as soon as the -6.0% threshold is reached, capping the drawdown at -6.0% (less 17 bps transaction costs: STT, exchange turnover fees, GST, SEBI fees, stamp duty, slippage). The portfolio moves 100% of capital into safe liquid cash reserves earning the daily RBI repo yield ($5.25\% / 252$).
 3. **Mandatory Cooldown Window**:
-   To prevent premature re-entry into an ongoing falling-knife waterfall, the portfolio must remain parked in 100% cash for at least **5 consecutive trading days** (`STOP_COOLDOWN_DAYS = 5`).
-4. **20-Day Simple Moving Average (20 SMA) Re-Entry Filter**:
-   After the 5-day cooldown has elapsed, the model monitors the NIFTY 50 index benchmark relative to its **20-day Simple Moving Average**:
-   $$\text{SMA}_{20, t} = \frac{1}{20} \sum_{i=0}^{19} P_{t-i}$$
+   To prevent premature re-entry into an ongoing falling-knife waterfall, the portfolio must remain parked in 100% cash for at least **15 consecutive trading days** (`STOP_COOLDOWN_DAYS = 15`).
+4. **10-Day Simple Moving Average (10 SMA) Re-Entry Filter**:
+   After the 15-day cooldown has elapsed, the model monitors the NIFTY 50 index benchmark relative to its **10-day Simple Moving Average**:
+   $$\text{SMA}_{10, t} = \frac{1}{10} \sum_{i=0}^{9} P_{t-i}$$
    Re-entry triggers on day $t+1$ as soon as:
-   $$P_{\text{NIFTY}, t} > \text{SMA}_{20, t} \quad \text{and} \quad \text{DaysInCash} \ge 5$$
+   $$P_{\text{NIFTY}, t} > \text{SMA}_{10, t} \quad \text{and} \quad \text{DaysInCash} \ge 15$$
    Upon re-entry, the portfolio repurchases the optimal sector allocation dictated by the active HMM regime at that moment, resetting peak equity so that subsequent drawdown is measured from the fresh re-entry level.
 
 ---
 
 ### Full-Sample Performance Scorecard vs Buy & Hold
 
-Evaluated over continuous trading days (2015 to 2026) with realistic transaction costs (17 bps statutory taxes, exchange fees, and slippage each way), strict T+1 execution on regime transitions, and immediate T+0 execution on the -12% drawdown stop:
+Evaluated over continuous trading days (2015 to 2026) with realistic transaction costs (17 bps statutory taxes, exchange fees, and slippage each way), strict T+1 execution on regime transitions, and immediate T+0 execution on the -6% drawdown stop with 15-day cooldown:
 
-| Metric | Pure Sector Rotation Strategy (-12% T+0 Stop + 20 SMA) | NIFTY 50 Buy & Hold Benchmark | Outperformance / Alpha |
+| Metric | Pure Sector Rotation Strategy (-6% T+0 Stop + 15d Cooldown + 10 SMA) | NIFTY 50 Buy & Hold Benchmark | Outperformance / Alpha |
 |---|:---:|:---:|:---:|
-| **Annualized Return (CAGR)** | **+30.15%** | +11.08% | **+19.07% p.a. Alpha** |
-| **Sharpe Ratio ($r_f=6\%$)** | **+1.14** | +0.28 | **~4.1x Risk-Adjusted Edge** |
-| **Sortino Ratio** | **+1.58** | +0.34 | **4.6x Downside Efficiency** |
-| **Profit Factor** | **+1.30** | +1.13 | **Higher Compounding Edge** |
-| **Maximum Drawdown** | **-18.89%** | -38.44% | **+19.55% Drawdown Cushion** |
-| **Calmar Ratio** | **+1.60** | +0.29 | **5.5x Return-to-Drawdown** |
-| **Daily Win Rate** | **57.76%** | 53.87% | **+3.89% Higher Hit Rate** |
-| **Bootstrap 90% Sharpe CI** | **[0.62, 1.64]** | — | **Statistically Significant Alpha** |
-| **Bootstrap 90% Return CI** | **[18.7%, 42.0%]** | — | **Tight Dispersion Range** |
+| **Annualized Return (CAGR)** | **+27.37%** | +11.08% | **+16.29% p.a. Alpha** |
+| **Sharpe Ratio ($r_f=6\%$)** | **+1.18** | +0.28 | **~4.2x Risk-Adjusted Edge** |
+| **Sortino Ratio** | **+1.63** | +0.34 | **4.8x Downside Efficiency** |
+| **Profit Factor** | **+1.35** | +1.13 | **Higher Compounding Edge** |
+| **Maximum Drawdown** | **-15.02%** | -38.44% | **+23.42% Drawdown Cushion** |
+| **Calmar Ratio** | **+1.82** | +0.29 | **6.3x Return-to-Drawdown** |
+| **Daily Win Rate** | **64.82%** | 53.87% | **+10.95% Higher Hit Rate** |
+| **Bootstrap 90% Sharpe CI** | **[0.67, 1.70]** | — | **Statistically Significant Alpha** |
+| **Bootstrap 90% Return CI** | **[17.8%, 37.8%]** | — | **Tight Dispersion Range** |
 | **Mean Walk-Forward OOS Return** | **+26.1%** | +11.7% | **Zero-Leakage Strict T+1 8 Folds** |
 | **Mean Walk-Forward OOS Sharpe** | **+0.71** | +0.21 | **Honest Out-of-Sample Validation** |
 
@@ -313,16 +313,17 @@ Evaluated over continuous trading days (2015 to 2026) with realistic transaction
 ### Standard Deviation of Returns Analysis
 
 #### 1. Overall Return Volatility
-- **Sector Rotation Daily StdDev**: **$1.124\%$** ($17.85\%$ annualized).
+- **Sector Rotation Daily StdDev**: **$0.969\%$** ($15.38\%$ annualized).
 - **NIFTY 50 Benchmark Daily StdDev**: **$1.018\%$** ($16.15\%$ annualized).
+- **Net Volatility Drag**: **Strategy annualized volatility is lower than the benchmark (-0.77%)** while compounding at +27.37% vs +11.08%.
 
 #### 2. Standard Deviation Broken Down by Market Regime
 | Regime | Trading Days | Sector Rotation Ann. $\sigma$ | NIFTY 50 Ann. $\sigma$ | Strategic Impact |
 |---|:---:|:---:|:---:|---|
-| **Bull** | 323 | **11.83%** | 10.62% | High-beta cyclicals capture outsized momentum |
-| **Bear** | 573 | **22.34%** | **24.86%** | **-2.52% Volatility Reduction** via defensive rotation & cash protection |
-| **HighVol** | 863 | **14.67%** | 10.30% | Controlled risk via inflation-hedging CPSE & tangible asset ETFs |
-| **Sideways** | 836 | **19.10%** | 15.19% | Steady compounding via core banking & realty leaders |
+| **Bull** | 323 | **11.50%** | 10.62% | Controlled high-beta capture |
+| **Bear** | 573 | **19.01%** | **24.86%** | **-5.85% Volatility Reduction** via prompt -6% cash exit & 15d cooldown |
+| **HighVol** | 863 | **14.21%** | 10.30% | Resilient defense via CPSE dividends & auto compounders |
+| **Sideways** | 836 | **15.01%** | 15.19% | Lower volatility than market via banking & realty leaders |
 
 ---
 
@@ -459,8 +460,8 @@ Across 2,000 stationary bootstrap trials on the Sector Rotation Strategy with Ca
 
 ### Embedded Capital Protection & Drawdown Tracking
 The live paper portfolio mirrors the backtest's risk management architecture:
-- **`STOP_LOSS_DD = -0.12`**: Automatically liquidates all ETF positions to 100% Cash / Liquid if NAV suffers a -12.0% drawdown from peak.
-- **`STOP_REENTRY_MA = 10` & `STOP_REENTRY_TYPE = 'EMA'`**: Re-enters equity allocations only after NIFTY 50 reclaims its 10-day Exponential Moving Average following a minimum 5-day cash cooldown (`STOP_COOLDOWN_DAYS = 5`).
+- **`STOP_LOSS_DD = -0.06`**: Automatically liquidates all ETF positions to 100% Cash / Liquid if NAV suffers a -6.0% drawdown from peak.
+- **`STOP_REENTRY_MA = 10` & `STOP_REENTRY_TYPE = 'SMA'`**: Re-enters equity allocations only after NIFTY 50 reclaims its 10-day Simple Moving Average following a minimum 15-day cash cooldown (`STOP_COOLDOWN_DAYS = 15`).
 - **Comprehensive Daily Logging (`paper_portfolio_history.csv`)**: Records daily NAV, Cash, Equity, Drawdown, `In_Cash` status, `MA_Filter`, `EMA_10`, `SMA_150`, `SMA_200`, VIX, regime posteriors, per-ETF unit counts, and cumulative transaction charges.
 
 ### Whole-Unit Discretization & Residual Cash Tracking
@@ -498,7 +499,7 @@ Total friction on portfolio rebalancing typically totals ~₹1,683 per ₹10,00,
 ├──────────────────────────────────────────┬─────────────────────────────────────────────┤
 │ PANEL 2: CURRENT PORTFOLIO ALLOCATION    │ PANEL 3: PORTFOLIO DRAWDOWN (%)             │
 │ • Donut Pie Chart of current weights     │ • Peak-to-trough drawdown underwater curve  │
-│ • Slices sorted descending by capital    │ • Stop Loss Threshold line (-12% DD)        │
+│ • Slices sorted descending by capital    │ • Stop Loss Threshold line (-6% DD)         │
 │ • Central donut callout showing live NAV │ • Tracks initial friction drag & market DD  │
 ├──────────────────────────────────────────┼─────────────────────────────────────────────┤
 │ PANEL 4: DAILY P&L DISTRIBUTION          │ PANEL 5: CURRENT HOLDINGS TABLE             │
@@ -521,14 +522,14 @@ The pipeline automatically generates **10 publication-grade figures** saved to b
 | Figure | Filename | Key Panels & Visual Content | Quantitative Interpretation |
 |---|---|---|---|
 | **Fig 1** | `fig1_regime_detection.png` | NIFTY 50 price path with color-coded regime spans, posterior probabilities, 20-Day VIX Difference (vix_diff_20) with ±5pt spike/crush alerts and directional fills, equity curve, and regime distribution pie. | High-level diagnostic showing regime separation, posterior certainty, VIX momentum shocks, and Sector Rotation compounding trajectory. |
-| **Fig 2** | `fig2_strategy_backtest.png` | Cumulative wealth: **Sector Rotation (+30.15% CAGR, -18.89% Max DD) vs Buy & Hold (+11.08% CAGR, -38.44% Max DD)**, underwater drawdown with -12% Stop guideline, annual returns. | Validates persistent multi-year alpha generation (+19.07% p.a.) and superior capital preservation via the 20 SMA stop engine. |
+| **Fig 2** | `fig2_strategy_backtest.png` | Cumulative wealth: **Sector Rotation (+27.37% CAGR, -15.02% Max DD) vs Buy & Hold (+11.08% CAGR, -38.44% Max DD)**, underwater drawdown with -6% Stop guideline, annual returns. | Validates persistent multi-year alpha generation (+16.29% p.a.) and superior capital preservation via the 10 SMA stop engine. |
 | **Fig 3** | `fig3_hmm_internals.png` | Regularized transition matrix heatmap, emission distributions across features, and regime persistence CDF. | Verifies economic validity and stability of the underlying Markov process. |
 | **Fig 4** | `fig4_confidence_intervals.png` | 2,000-trial bootstrap distributions for Sharpe, Annual Return, and rolling posterior confidence. | Statistical proof that outperformance is not an artifact of random sampling. |
 | **Fig 5** | `fig5_model_selection.png` | BIC & AIC comparison across 3, 4, 5 states with complexity penalty curves. | Demonstrates mathematical optimality of the 4-state architecture. |
 | **Fig 6** | `fig6_walk_forward.png` | Out-of-sample annual return (side-by-side grouped bars for Sector Rotation vs NIFTY 50 Buy & Hold), Sharpe, and switch frequency across 8 annual walk-forward folds. | Proves real-world out-of-sample predictive power and benchmark outperformance without lookahead bias. |
 | **Fig 7** | `fig7_sector_rotation.png` | 8-ETF sector allocation heatmap and dynamic regime donut allocation charts. | Illustrates the intuitive economic rotation (Autos/CPSE in HighVol, Banks/Realty in Sideways, etc.). |
 | **Fig 8** | `fig8_new_macro_signals.png` | Sovereign yield curve spread (10Y-2Y), CPI, IIP, WPI, and 2D regime phase spaces. | Connects macroeconomic cycles with equity regime transitions. |
-| **Fig 9** | `fig9_paper_portfolio.png` | Live Paper Trading Portfolio Dashboard: NAV vs NIFTY benchmark with regime background shading, Current Portfolio Donut Pie Chart, Drawdown tracking with -12% Stop line, Daily P&L, Current Holdings Table, and Performance Summary card with itemized regulatory friction charges. | Validates true forward out-of-sample execution on actual EOD ETF prices with whole share rounding and full SEBI/IT Act regulatory tax and fee deductions. |
+| **Fig 9** | `fig9_paper_portfolio.png` | Live Paper Trading Portfolio Dashboard: NAV vs NIFTY benchmark with regime background shading, Current Portfolio Donut Pie Chart, Drawdown tracking with -6% Stop line, Daily P&L, Current Holdings Table, and Performance Summary card with itemized regulatory friction charges. | Validates true forward out-of-sample execution on actual EOD ETF prices with whole share rounding and full SEBI/IT Act regulatory tax and fee deductions. |
 | **Fig 10** | `fig10_parameter_stability.png` | Multi-dimensional parameter sensitivity heatmaps across Stoploss (-8% to -18%), Cooldown Days (1 to 15), Minimum Hold Period, and Moving Average variations. | Verifies broad topological plateau and absence of fragile overfitted local optima. |
 
 ---
@@ -557,7 +558,7 @@ Posterior Probabilities:
   Bull=0.0%  Bear=1.1%  HighVol=0.0%  Sideways=98.9%
 
 Target Model Exposure:
-  Equity: 100% (Pure Sector Rotation) | Cash: 0% (Capital Protection Active at -12% DD)
+  Equity: 100% (Pure Sector Rotation) | Cash: 0% (Capital Protection Active at -6% DD)
 
 Recommended Sector Allocation:
   ITBEES: 40.0% | MOREALTY: 40.0% | PHARMABEES: 20.0%

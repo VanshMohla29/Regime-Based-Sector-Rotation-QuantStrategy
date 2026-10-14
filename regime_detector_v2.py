@@ -73,11 +73,11 @@ TC_STT       = 0.001   # 0.10% STT on sell-side (equity delivery)
 TC_SLIPPAGE  = 0.0005  # 0.05% market impact / slippage
 TC_TOTAL     = TC_STT + TC_SLIPPAGE   # applied on every regime switch
 
-# Capital protection parameters (-12% drawdown stop with T+0 execution + 10 SMA re-entry)
-STOP_LOSS_DD       = -0.12   # -12% portfolio drawdown stop to 100% Cash / Liquid (T+0 execution)
+# Capital protection parameters (-6% drawdown stop with T+0 execution + 10 SMA re-entry)
+STOP_LOSS_DD       = -0.06   # -6% portfolio drawdown stop to 100% Cash / Liquid (T+0 execution)
 STOP_REENTRY_MA    = 10      # 10-day Simple Moving Average on NIFTY 50
 STOP_REENTRY_TYPE  = 'SMA'   # 'EMA' or 'SMA'
-STOP_COOLDOWN_DAYS = 5       # Minimum 5 trading days in Cash before checking re-entry
+STOP_COOLDOWN_DAYS = 15      # Minimum 15 trading days in Cash before checking re-entry
 
 # Walk-forward parameters
 WF_TRAIN_YEARS  = 3   # years of history to train on
@@ -2037,12 +2037,12 @@ def plot_strategy_backtest(result, strategy_returns, strategy_capital, buy_hold_
     bh_peak    = np.maximum.accumulate(buy_hold_capital)
     bh_dd      = (buy_hold_capital - bh_peak) / bh_peak * 100
 
-    axes[0, 1].plot(result.index, strat_dd, color='#10b981', lw=1.0, label='Sector Rotation Strategy (-12% Stop)')
+    axes[0, 1].plot(result.index, strat_dd, color='#10b981', lw=1.0, label='Sector Rotation Strategy (-6% Stop)')
     axes[0, 1].plot(result.index, bh_dd, color='#ef4444', lw=0.8, ls='--', label='Buy & Hold')
-    axes[0, 1].axhline(-12.0, color='#f59e0b', ls='--', lw=0.9, alpha=0.8, label='Stop Threshold (-12%)')
+    axes[0, 1].axhline(-6.0, color='#f59e0b', ls='--', lw=0.9, alpha=0.8, label='Stop Threshold (-6%)')
     axes[0, 1].fill_between(result.index, strat_dd, 0, color='#10b981', alpha=0.15)
     axes[0, 1].fill_between(result.index, bh_dd, 0, color='#ef4444', alpha=0.08)
-    axes[0, 1].set_title('Drawdown Profile (%)  ·  Capital Protection Stop (-12%)', fontsize=10, color='#9ca3af')
+    axes[0, 1].set_title('Drawdown Profile (%)  ·  Capital Protection Stop (-6%)', fontsize=10, color='#9ca3af')
     axes[0, 1].set_ylabel('% Drawdown', fontsize=9)
     axes[0, 1].grid(True, lw=0.3)
     axes[0, 1].legend(fontsize=8, framealpha=0.3, facecolor='#0f0f11')
@@ -2762,7 +2762,7 @@ def main():
     bh_cap = 1_000_000 * np.exp(np.cumsum(result['Returns'].values))
 
     # ── 8. Sector Rotation Performance Scorecard vs Buy & Hold ──────
-    print("\n[8] Computing Sector Rotation Performance Scorecard (TC-adjusted, -12% Stop Protected)...")
+    print(f"\n[8] Computing Sector Rotation Performance Scorecard (TC-adjusted, {int(STOP_LOSS_DD*100)}% Stop Protected)...")
     metrics = compute_performance_metrics(strat_ret, strat_cap)
     bh_metrics = compute_performance_metrics(result['Returns'].values, bh_cap)
 

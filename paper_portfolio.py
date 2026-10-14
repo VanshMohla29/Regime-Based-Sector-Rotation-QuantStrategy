@@ -117,11 +117,11 @@ def compute_sell_charges(turnover, n_scrips=1):
 # Anti-whipsaw minimum holding period
 MIN_HOLD_DAYS = 7
 
-# Capital protection parameters (-12% drawdown stop with T+0 execution + 10 SMA re-entry)
-STOP_LOSS_DD       = -0.12   # -12% portfolio drawdown stop to 100% Cash / Liquid (T+0 execution)
+# Capital protection parameters (-6% drawdown stop with T+0 execution + 10 SMA re-entry)
+STOP_LOSS_DD       = -0.06   # -6% portfolio drawdown stop to 100% Cash / Liquid (T+0 execution)
 STOP_REENTRY_MA    = 10      # 10-day Simple Moving Average on NIFTY 50
 STOP_REENTRY_TYPE  = 'SMA'   # 'EMA' or 'SMA'
-STOP_COOLDOWN_DAYS = 5       # Minimum 5 trading days in Cash before checking re-entry
+STOP_COOLDOWN_DAYS = 15      # Minimum 15 trading days in Cash before checking re-entry
 
 REGIME_COLORS = {
     'Bull':     '#10b981',
@@ -633,7 +633,7 @@ def run_paper_trading(df, feat, regimes, regime_posteriors, etf_prices,
                 day_charges += sell_charges
                 total_charges_paid += sell_charges
 
-            current_regime = "CASH (STOP -12%)"
+            current_regime = f"CASH (STOP {int(STOP_LOSS_DD*100)}%)"
             rebalanced = True
 
         # ── 2. Check if Re-entry was triggered on previous day ──
@@ -797,7 +797,7 @@ def run_paper_trading(df, feat, regimes, regime_posteriors, etf_prices,
 
                 in_cash = True
                 exit_next_day = False
-                current_regime = "CASH (STOP -12%)"
+                current_regime = f"CASH (STOP {int(STOP_LOSS_DD*100)}%)"
                 rebalanced = True
                 days_in_cash = 0
                 equity_value = 0.0
