@@ -30,6 +30,6 @@
     "max_sharpe": 1.276,
     "coefficient_of_variation_pct": 7.52,
     "pct_combinations_beating_bh": 100.0,
-    "worst_case_outperformance_vs_bh_pct": 228.0
+    "worst_case_outperformance_vs_bh_pct": 227.9
   }
 }
