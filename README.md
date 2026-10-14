@@ -63,10 +63,10 @@ The **India Market Regime Detector (v2)** provides an institutional-grade quanti
 - **11-Signal Feature Space**: Selected via an exhaustive 7,680-combination grid search across 6 economic categories. Combines market dynamics (5-day percentage return `ret_5d_pct`, 60-day realized volatility `vol_60d`, long-term structural trend ratio `price_vs_ma200`, peak drawdown `drawdown`, 20-day drawdown change `drawdown_diff20d`, and VIX vs 20-day MA ratio `vix_vs_ma20`) with official macroeconomic fundamentals (10Y-2Y sovereign yield curve spread `yield_curve`, MoSPI CPI inflation `cpi_yoy`, MoSPI IIP industrial growth `iip_yoy`, DPIIT WPI inflation `wpi_yoy`, and RBI real policy repo rate YoY momentum `real_rate`) normalized via non-parametric Gaussian Quantile Transformation.
 - **Dynamic KNN Macro Imputation**: Imputes intermediate macro calendar gaps via `KNNImputer(n_neighbors=5)` anchored strictly on 1-day Return, India VIX, and Drawdown, eliminating lookahead bias while maintaining macroeconomic continuity.
 - **Pure Sector Rotation Strategy**: Allocates capital dynamically across **8 real NSE Sector ETFs** (`BANKBEES`, `ITBEES`, `PHARMABEES`, `AUTOBEES`, `METALIETF`, `MOREALTY`, `CPSEETF`, `INFRABEES`) based on constrained Sharpe-ratio quadratic optimization (SLSQP).
-- **Superior Risk-Adjusted Edge**: Delivers **+27.89% CAGR**, a **1.06 Sharpe ratio**, a **1.48 Sortino ratio**, and a **1.27 Profit Factor** (vs. +11.13% CAGR, 0.28 Sharpe, and 1.13 Profit Factor for the NIFTY 50 Buy & Hold benchmark over 2015 to 2026), generating **+16.76% per year in net alpha** while **capping drawdown during systemic crashes** to **-23.75%** (vs. −38.44% for Buy & Hold during the 2020 COVID crash).
+- **Superior Risk-Adjusted Edge**: Delivers **+27.85% CAGR**, a **1.07 Sharpe ratio**, a **1.50 Sortino ratio**, and a **1.28 Profit Factor** (vs. +11.08% CAGR, 0.28 Sharpe, and 1.13 Profit Factor for the NIFTY 50 Buy & Hold benchmark over 2015 to 2026), generating **+16.77% per year in net alpha** while **capping drawdown during systemic crashes** to **-25.96%** (vs. −38.44% for Buy & Hold during the 2020 COVID crash).
 - **Institutional Capital Protection Architecture**: Implements a strict **-12% portfolio drawdown stop-loss with immediate T+0 execution** (executing as soon as trailing drawdown breaches -12.0%) combined with a **10-day Simple Moving Average (10 SMA)** re-entry filter, a mandatory 5-day cash cooldown, and a **7-day causal regime lockout**. During systemic market collapses, the strategy shifts 100% of capital immediately into liquid cash earning the RBI repo rate (5.25% p.a.). By using immediate T+0 stop-loss execution and a disciplined 10-day SMA rather than lagging 200-day or 150-day moving averages, the system safely sidestepped the catastrophic March 2020 COVID waterfall (from 11,133 down to 7,600) while rapidly capturing the broad cyclical recovery.
 - **Institutional Bad-Tick Filter**: Real-time outlier filter detects and sanitizes data feed glitches (such as Yahoo Finance's December 2019 decimal shift in `BANKBEES.NS` that previously produced an artificial -63% drawdown).
-- **Zero-Lookahead Walk-Forward Validation**: Eliminates all 6 lookahead leakage vectors (batch Viterbi decoding, retroactive anti-whipsaw smoothing, global sector weights, zero-lag macro publication, contemporaneous execution, and fold label switching). Reports dual out-of-sample metrics across 8 annual cross-cycle folds (2019–2026): **+29.3% mean fold return** (0.75 mean Sharpe, 1.24 mean Profit Factor) alongside true continuous **+21.2% chained OOS CAGR** (0.66 chained Sharpe, 1.19 chained Profit Factor) with only 7.9 switches per fold.
+- **Zero-Lookahead Walk-Forward Validation**: Eliminates all 6 lookahead leakage vectors (batch Viterbi decoding, retroactive anti-whipsaw smoothing, global sector weights, zero-lag macro publication, contemporaneous execution, and fold label switching). Reports dual out-of-sample metrics across 8 annual cross-cycle folds (2019–2026): **+24.9% mean fold return** (0.57 mean Sharpe, 1.20 mean Profit Factor) alongside true continuous **+17.4% chained OOS CAGR** (0.50 chained Sharpe, 1.16 chained Profit Factor).
 - **Live Paper Trading Execution Engine (`paper_portfolio.py`)**: Freezes the trained model and runs forward out-of-sample simulation using actual EOD ETF market prices, down-rounding allocations to whole integer units, tracking uninvested cash, and deducting realistic Indian regulatory taxes and charges (STT, exchange turnover, GST, SEBI charges, stamp duty, DP charges, and slippage).
 - **10 Publication-Grade Visualizations**: High-resolution dark-theme charts covering regime paths, backtests, HMM internal emissions, bootstrap distributions, model selection, walk-forward folds, sector rotation heatmaps, macro phase spaces, the live Paper Trading Portfolio Dashboard featuring a Donut Pie Chart allocation, and multi-dimensional parameter stability heatmaps.
 - **Production Delivery**: Real-time FastAPI REST microservice and interactive long-polling Telegram Bot with full command controls (`/status`, `/portfolio`, `/fig9`, `/macro`, `/stability`, `/retrain`).
@@ -110,10 +110,10 @@ The **India Market Regime Detector (v2)** provides an institutional-grade quanti
                                          ▼
                         VALIDATION & LIVE FORWARD EXECUTION
   ┌────────────────────────────────────────────────────────────────────────────────────┐
-  │  • Pure Sector Rotation Backtest (+27.89% CAGR, 1.06 Sharpe, 1.27 PF, -23.75% DD)  │
+  │  • Pure Sector Rotation Backtest (+27.85% CAGR, 1.07 Sharpe, 1.28 PF, -25.96% DD)  │
   │  • Capital Protection Stop (-12% DD T+0 Stop to 100% Cash + 10 SMA NIFTY Re-entry) │
-  │  • 8-Fold Causal Walk-Forward Validation (+29.3% Mean OOS, +21.2% Chained CAGR)    │
-  │  • Bootstrap Monte Carlo Confidence Intervals (N=2,000, 90% Sharpe [0.57, 1.58])   │
+  │  • 8-Fold Causal Walk-Forward Validation (+24.9% Mean OOS, +17.4% Chained CAGR)    │
+  │  • Bootstrap Monte Carlo Confidence Intervals (N=2,000, 90% Sharpe [0.56, 1.60])   │
   │  • Live Paper Trading Engine (Frozen Model, Whole Units, Indian Regulatory Costs)  │
   │  • 10 Publication-Grade Visualizations (Dark Theme Suite, Fig 10 Heatmaps)         │
   │  • Production FastAPI Microservice & Interactive Telegram Bot Interface            │
@@ -201,7 +201,7 @@ Because the model was in the **Sideways** regime on that date (which allocated 4
 To ensure institutional robustness against upstream feed corruption:
 1. `fetch_live_sector_data()` enforces an **automated outlier sanity check** across all 8 sector ETFs.
 2. Any single-day return with absolute magnitude exceeding $\pm 25\%$ (`|r_t| > 0.25`) is flagged as data corruption and automatically sanitized by substituting the daily return of the respective underlying sector proxy (`^NSEBANK`, `^CNXIT`, 3-stock basket, etc.).
-3. With this filter active and the 3-stock sector proxies, the true unhedged baseline maximum drawdown of the strategy matches economic realities, while the automated -12% Stop and 10 SMA re-entry engine caps drawdown at **-23.75%** and lifts strategy Sharpe to **1.06** (vs. -38.44% and 0.28 Sharpe for Buy & Hold).
+3. With this filter active and the 3-stock sector proxies, the true unhedged baseline maximum drawdown of the strategy matches economic realities, while the automated -12% Stop and 10 SMA re-entry engine caps drawdown at **-25.96%** and lifts strategy Sharpe to **1.07** (vs. -38.44% and 0.28 Sharpe for Buy & Hold).
 
 ---
 
@@ -345,17 +345,17 @@ Evaluated over continuous trading days (2015 to 2026) with realistic transaction
 
 | Metric | Pure Sector Rotation Strategy (-12% T+0 Stop + 10 SMA) | NIFTY 50 Buy & Hold Benchmark | Outperformance / Alpha |
 |---|:---:|:---:|:---:|
-| **Annualized Return (CAGR)** | **+27.89%** | +11.13% | **+16.76% p.a. Alpha** |
-| **Sharpe Ratio ($r_f=6\%$)** | **+1.06** | +0.28 | **~3.8x Risk-Adjusted Edge** |
-| **Sortino Ratio** | **+1.48** | +0.34 | **4.4x Downside Efficiency** |
-| **Profit Factor** | **+1.27** | +1.13 | **Higher Compounding Edge** |
-| **Maximum Drawdown** | **-23.75%** | -38.44% | **+14.69% Drawdown Cushion** |
-| **Calmar Ratio** | **+1.17** | +0.29 | **4.0x Return-to-Drawdown** |
-| **Daily Win Rate** | **56.32%** | 53.89% | **+2.43% Higher Hit Rate** |
-| **Bootstrap 90% Sharpe CI** | **[0.57, 1.58]** | — | **Statistically Significant Alpha** |
-| **Bootstrap 90% Return CI** | **[17.4%, 40.2%]** | — | **Tight Dispersion Range** |
-| **Mean Walk-Forward OOS Return** | **+29.3%** | +11.3% | **Zero-Leakage Strict T+1 8 Folds** |
-| **Mean Walk-Forward OOS Sharpe** | **+0.75** | +0.18 | **Honest Out-of-Sample Validation** |
+| **Annualized Return (CAGR)** | **+27.85%** | +11.08% | **+16.77% p.a. Alpha** |
+| **Sharpe Ratio ($r_f=6\%$)** | **+1.07** | +0.28 | **~3.8x Risk-Adjusted Edge** |
+| **Sortino Ratio** | **+1.50** | +0.34 | **4.4x Downside Efficiency** |
+| **Profit Factor** | **+1.28** | +1.13 | **Higher Compounding Edge** |
+| **Maximum Drawdown** | **-25.96%** | -38.44% | **+12.48% Drawdown Cushion** |
+| **Calmar Ratio** | **+1.07** | +0.29 | **3.7x Return-to-Drawdown** |
+| **Daily Win Rate** | **57.19%** | 53.87% | **+3.32% Higher Hit Rate** |
+| **Bootstrap 90% Sharpe CI** | **[0.56, 1.60]** | — | **Statistically Significant Alpha** |
+| **Bootstrap 90% Return CI** | **[17.0%, 40.0%]** | — | **Tight Dispersion Range** |
+| **Mean Walk-Forward OOS Return** | **+24.9%** | +11.7% | **Zero-Leakage Strict T+1 8 Folds** |
+| **Mean Walk-Forward OOS Sharpe** | **+0.57** | +0.21 | **Honest Out-of-Sample Validation** |
 
 ---
 
@@ -424,30 +424,30 @@ With all leakage eliminated, the model was tested across **8 full out-of-sample 
 | **2019-03 → 2020-03** | 734 | 244 | **−24.1%** | **−1.16** | 0.82 | −29.9% | −1.50 | 9 | COVID shock & global liquidity freeze |
 | **2020-03 → 2021-03** | 978 | 248 | **+131.4%** | **+2.93** | 1.73 | +74.6% | +2.21 | 2 | Broad cyclical post-COVID bull market |
 | **2021-03 → 2022-03** | 1,226 | 248 | **+28.9%** | **+1.37** | 1.35 | +19.5% | +0.75 | 12 | Global rate hike cycle & commodity surge |
-| **2022-03 → 2023-03** | 1,474 | 249 | **−12.9%** | **−1.15** | 0.88 | −2.2% | −0.56 | 8 | Monetary tightening & consolidation |
-| **2023-03 → 2024-03** | 1,723 | 244 | **+79.4%** | **+3.21** | 1.81 | +29.8% | +2.04 | 11 | Broad equity expansion & capex cycle |
-| **2024-03 → 2025-03** | 1,967 | 248 | **+4.8%** | **−0.08** | 1.05 | +4.8% | −0.09 | 15 | Range-bound sideways rotation |
-| **2025-03 → 2026-03** | 2,215 | 246 | **+1.9%** | **−0.23** | 1.02 | −3.7% | −0.73 | 5 | Late-cycle sideways consolidation |
-| **2026-03 → 2026-10** | 2,461 | 132 | **+25.0%** | **+1.12** | 1.28 | −2.7% | −0.68 | 1 | Forward out-of-sample continuation |
+| **2022-03 → 2023-03** | 1,474 | 249 | **−12.8%** | **−1.14** | 0.88 | −2.2% | −0.56 | 8 | Monetary tightening & consolidation |
+| **2023-03 → 2024-03** | 1,723 | 244 | **+63.0%** | **+2.83** | 1.70 | +29.8% | +2.04 | 18 | Broad equity expansion & capex cycle |
+| **2024-03 → 2025-03** | 1,967 | 248 | **+1.7%** | **−0.25** | 1.02 | +4.8% | −0.09 | 17 | Range-bound sideways rotation |
+| **2025-03 → 2026-03** | 2,215 | 246 | **−6.2%** | **−0.69** | 0.94 | −3.7% | −0.73 | 5 | Late-cycle sideways consolidation |
+| **2026-03 → 2026-10** | 2,461 | 133 | **+17.5%** | **+0.70** | 1.20 | +0.4% | −0.43 | 1 | Forward out-of-sample continuation |
 
 ```text
 Strictly Causal Walk-Forward Summary (8 Folds, Strict T+1):
-  Mean OOS Ann. Return   : WF +29.3% | NIFTY +11.3%
-  Mean OOS Sharpe Ratio  : WF 0.75   | NIFTY 0.18
-  Mean OOS Profit Factor : 1.24
-  Chained OOS CAGR       : WF +21.2% | NIFTY +8.6%
-  Chained OOS Sharpe     : WF 0.66   | NIFTY 0.13
-  Chained OOS Profit Fac : 1.19
+  Mean OOS Ann. Return   : WF +24.9% | NIFTY +11.7%
+  Mean OOS Sharpe Ratio  : WF 0.57   | NIFTY 0.21
+  Mean OOS Profit Factor : 1.20
+  Chained OOS CAGR       : WF +17.4% | NIFTY +8.8%
+  Chained OOS Sharpe     : WF 0.50   | NIFTY 0.14
+  Chained OOS Profit Fac : 1.16
   Positive-Sharpe Folds  : 4 / 8 (50.0%)
-  Mean Switches per Fold : 7.9
+  Mean Switches per Fold : 9.0
 ```
 
 * **Arithmetic Fold Mean vs. Geometric Chained Compounding**:
-  - The reported fold mean (+29.3% vs NIFTY +11.3%) is an unweighted arithmetic average of 8 separate out-of-sample folds. Fold 2 (2020-03 → 2021-03) captured the post-COVID super rally and generated **+131.4%** (vs NIFTY +74.6%), which lifts the unweighted average.
-  - When daily returns are continuously chained into a single uninterrupted equity curve, the **true continuous Chained OOS CAGR is +21.2%** (Sharpe 0.66, Profit Factor 1.19) vs NIFTY Buy & Hold Chained CAGR of **+8.6%** (Sharpe 0.13).
-  - This is logically and structurally lower than the full-sample In-Sample CAGR (+27.89%), demonstrating genuine out-of-sample behavior with zero lookahead bias.
+  - The reported fold mean (+24.9% vs NIFTY +11.7%) is an unweighted arithmetic average of 8 separate out-of-sample folds. Fold 2 (2020-03 → 2021-03) captured the post-COVID super rally and generated **+131.4%** (vs NIFTY +74.6%), which lifts the unweighted average.
+  - When daily returns are continuously chained into a single uninterrupted equity curve, the **true continuous Chained OOS CAGR is +17.4%** (Sharpe 0.50, Profit Factor 1.16) vs NIFTY Buy & Hold Chained CAGR of **+8.8%** (Sharpe 0.14).
+  - This is logically and structurally lower than the full-sample In-Sample CAGR (+27.85%), demonstrating genuine out-of-sample behavior with zero lookahead bias.
 
-* **Honest Validation Gap**: The OOS Sharpe (0.66 chained, 0.75 mean) is calibrated and resilient compared to the in-sample full-backtest Sharpe (1.06), confirming that lookahead bias has been completely eliminated and the reported performance reflects real-world deployment expectations.
+* **Honest Validation Gap**: The OOS Sharpe (0.50 chained, 0.57 mean) is calibrated and resilient compared to the in-sample full-backtest Sharpe (1.07), confirming that lookahead bias has been completely eliminated and the reported performance reflects real-world deployment expectations.
 
 ---
 
@@ -574,7 +574,7 @@ The pipeline automatically generates **10 publication-grade figures** saved to b
 | Figure | Filename | Key Panels & Visual Content | Quantitative Interpretation |
 |---|---|---|---|
 | **Fig 1** | `fig1_regime_detection.png` | NIFTY 50 price path with color-coded regime spans, posterior probabilities, India VIX vs 20-Day SMA (`vix_vs_ma20`) with +20% / -15% volatility spike/crush alerts and directional fills, equity curve, and regime distribution pie. | High-level diagnostic showing regime separation, posterior certainty, VIX relative momentum shocks, and Sector Rotation compounding trajectory. |
-| **Fig 2** | `fig2_strategy_backtest.png` | Cumulative wealth: **Sector Rotation (+27.89% CAGR, -23.75% Max DD) vs Buy & Hold (+11.13% CAGR, -38.44% Max DD)**, underwater drawdown with -12% Stop guideline, annual returns. | Validates persistent multi-year alpha generation (+16.76% p.a.) and superior capital preservation via the 10 SMA stop engine. |
+| **Fig 2** | `fig2_strategy_backtest.png` | Cumulative wealth: **Sector Rotation (+27.85% CAGR, -25.96% Max DD) vs Buy & Hold (+11.08% CAGR, -38.44% Max DD)**, underwater drawdown with -12% Stop guideline, annual returns. | Validates persistent multi-year alpha generation (+16.77% p.a.) and superior capital preservation via the 10 SMA stop engine. |
 | **Fig 3** | `fig3_hmm_internals.png` | Regularized transition matrix heatmap, emission distributions across features, and regime persistence CDF. | Verifies economic validity and stability of the underlying Markov process. |
 | **Fig 4** | `fig4_confidence_intervals.png` | 2,000-trial bootstrap distributions for Sharpe, Annual Return, and rolling posterior confidence. | Statistical proof that outperformance is not an artifact of random sampling. |
 | **Fig 5** | `fig5_model_selection.png` | BIC & AIC comparison across 3, 4, 5 states with complexity penalty curves. | Demonstrates mathematical optimality of the 4-state architecture. |
@@ -590,16 +590,16 @@ To verify that the Sector Rotation Strategy does not suffer from data mining, ba
 
 1. **Risk Management Grid (Stop-Loss DD vs. Cash Cooldown Days)**:
    - Evaluates a 9×8 matrix (72 combinations) spanning Stop-Loss Drawdowns ($\text{Stop}_{DD} \in [-6\%, -25\%]$) and Cooldown Lockouts ($T_{\text{cooldown}} \in [1, 20]\text{ days}$).
-   - **Sharpe Ratio Stability**: Strategy Sharpe spans $[0.80, 1.10]$ (mean $0.99 \pm 0.06$) across the entire surface.
+   - **Sharpe Ratio Stability**: Strategy Sharpe spans $[0.86, 1.28]$ (mean $1.08 \pm 0.08$) across the entire surface.
    - **CAGR Stability**: Annualized return remains elevated between $+22.5\%$ and $+28.5\%$.
    - **Drawdown Containment**: Max drawdown is strictly held within $[-14.8\%, -26.5\%]$ across all configurations (vs. $-38.4\%$ for NIFTY 50 Buy & Hold).
 2. **Trend Re-entry Filter Sensitivity (MA Window)**:
-   - Sweeps moving average re-entry lengths from 5 to 50 trading days across stop-loss thresholds. Sharpe remains elevated and stable within $[0.85, 1.11]$ (mean $0.98$), confirming that the 10-day SMA operating point captures prompt re-entry during V-shaped bottoms while maintaining robust drawdown containment.
+   - Sweeps moving average re-entry lengths from 5 to 50 trading days across stop-loss thresholds. Sharpe remains elevated and stable within $[0.88, 1.28]$ (mean $1.07$), confirming that the 10-day SMA operating point captures prompt re-entry during V-shaped bottoms while maintaining robust drawdown containment.
 3. **Causal Regime Smoothing Sensitivity (Min-Hold Days)**:
-   - Sweeps anti-whipsaw lockout periods from 1 to 14 days across stop-loss thresholds. Sharpe remains stable within $[0.88, 1.11]$, verifying that the 7-day minimum holding filter avoids false flips without introducing parameter fragility.
+   - Sweeps anti-whipsaw lockout periods from 1 to 14 days across stop-loss thresholds. Sharpe remains stable within $[0.88, 1.28]$, verifying that the 7-day minimum holding filter avoids false flips without introducing parameter fragility.
 4. **Local Plateau & Robustness Metrics**:
-   - **Local 3×3 Neighborhood**: Centered at baseline $(-12\% \text{ DD}, 5\text{d Cooldown})$, the local 3×3 neighborhood exhibits a mean Sharpe of $1.005 \pm 0.045$ with a **Coefficient of Variation of only 4.5%**, confirming an expansive operating plateau.
-   - **Benchmark Dominance**: **100% of tested parameter combinations beat Buy & Hold** (worst-case strategy Sharpe of $0.80$ is $+208.6\%$ higher than Buy & Hold's $0.26$).
+   - **Local 3×3 Neighborhood**: Centered at baseline $(-12\% \text{ DD}, 5\text{d Cooldown})$, the local 3×3 neighborhood exhibits a mean Sharpe of $1.086 \pm 0.032$ with a **Coefficient of Variation of only 2.93%**, confirming an exceptionally expansive, stable operating plateau.
+   - **Benchmark Dominance**: **100% of tested parameter combinations beat Buy & Hold** (worst-case strategy Sharpe of $0.86$ is $+228.0\%$ higher than Buy & Hold's $0.26$).
    - Full tabular records are exported to `parameter_stability_summary.csv` and machine-readable `parameter_stability_report.json`.
 
 ---
