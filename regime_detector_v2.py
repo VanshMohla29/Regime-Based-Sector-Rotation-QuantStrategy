@@ -448,10 +448,31 @@ def fetch_india_wpi():
         print("  [warn] WPI: Insufficient data to compute YoY — using fallback value")
         return None
 
-    print(f"  \u2713 WPI (Spliced): {len(wpi_yoy)} months ({wpi_yoy.index[0].strftime('%Y-%m')} \u2192 "
-          f"{wpi_yoy.index[-1].strftime('%Y-%m')}) | Latest: {wpi_yoy.iloc[-1]:.2f}% "
-          f"[{series_label}]")
-    return wpi_yoy
+    # ── Step 5: Compute MoM % change and 3-month MA surprise ──
+    mom_new = (wpi_new.pct_change(1) * 100).dropna() if wpi_new is not None else None
+    mom_old = (wpi_old.pct_change(1) * 100).dropna() if wpi_old is not None else None
+    if mom_new is not None and mom_old is not None:
+        cutoff_m = mom_new.index.min()
+        old_m_backfill = mom_old[mom_old.index < cutoff_m]
+        wpi_mom = pd.concat([old_m_backfill, mom_new]).sort_index()
+    elif mom_new is not None:
+        wpi_mom = mom_new
+    else:
+        wpi_mom = mom_old
+
+    if wpi_mom is not None:
+        wpi_mom_ma3m = wpi_mom.rolling(3).mean().bfill()
+        wpi_mom_vs_ma3m = (wpi_mom - wpi_mom_ma3m).bfill()
+        wpi_mom_vs_ma3m.name = 'WPI_MoM_vs_MA3M'
+    else:
+        wpi_mom_vs_ma3m = pd.Series(0.0, index=wpi_yoy.index, name='WPI_MoM_vs_MA3M')
+
+    print(f"  ✓ WPI (Spliced YoY & MoM): {len(wpi_yoy)} months ({wpi_yoy.index[0].strftime('%Y-%m')} → "
+          f"{wpi_yoy.index[-1].strftime('%Y-%m')}) | Latest YoY: {wpi_yoy.iloc[-1]:.2f}% | "
+          f"Latest MoM Surprise: {wpi_mom_vs_ma3m.iloc[-1]:+.2f}% [{series_label}]")
+
+    df_wpi = pd.DataFrame({'WPI': wpi_yoy, 'WPI_MoM_vs_MA3M': wpi_mom_vs_ma3m})
+    return df_wpi
 
 def impute_macro_signals(df):
     """
@@ -460,7 +481,7 @@ def impute_macro_signals(df):
     Completely eliminates static hardcoded fallback numbers.
     """
     anchor_cols = ['Ret_1d', 'Vix', 'drawdown']
-    macro_cols = ['GSecYield10', 'GSecYield2', 'CPI', 'IIP', 'RepoRate', 'WPI']
+    macro_cols = ['GSecYield10', 'GSecYield2', 'CPI', 'IIP', 'RepoRate', 'WPI', 'WPI_MoM_vs_MA3M']
 
     # Ensure anchor features are populated
     if 'Ret_1d' not in df.columns:
@@ -592,10 +613,17 @@ def fetch_live_market_data(start_date="2015-01-01"):
     if wpi_data is not None:
         # Apply publication lag: 1 month offset
         wpi_data.index = wpi_data.index + pd.DateOffset(months=1)
-        wpi_daily = wpi_data.reindex(df.index, method='ffill')
-        df['WPI'] = wpi_daily
+        if isinstance(wpi_data, pd.DataFrame):
+            wpi_daily = wpi_data.reindex(df.index, method='ffill')
+            df['WPI'] = wpi_daily['WPI']
+            df['WPI_MoM_vs_MA3M'] = wpi_daily['WPI_MoM_vs_MA3M'].bfill()
+        else:
+            wpi_daily = wpi_data.reindex(df.index, method='ffill')
+            df['WPI'] = wpi_daily
+            df['WPI_MoM_vs_MA3M'] = (df['WPI'] - df['WPI'].rolling(63).mean()).bfill()
     else:
         df['WPI'] = np.nan
+        df['WPI_MoM_vs_MA3M'] = np.nan
 
     # ── Dynamic KNN Imputation anchored on Ret_1d, Vix, drawdown (k=5) ──
     df = impute_macro_signals(df)
@@ -760,12 +788,15 @@ def engineer_features(df):
     feat['vix_roc_5']    = df['VIX'].pct_change(5)
     
     # 9. Macro features (CPI, IIP, yield curve, rate spread)
-    feat['yield_curve'] = df['YieldCurve']
-    feat['rate_spread'] = df['GSecYield10'] - df['RepoRate']
-    feat['cpi_yoy']     = df['CPI']
-    feat['iip_yoy']     = df['IIP']
-    feat['wpi_yoy']     = df['WPI']
-    feat['real_rate']   = (df['RealRate'] - df['RealRate'].shift(252)).bfill()
+    feat['yield_curve']     = df['YieldCurve']
+    feat['rate_spread']     = df['GSecYield10'] - df['RepoRate']
+    feat['cpi_yoy']         = df['CPI']
+    feat['iip_yoy']         = df['IIP']
+    feat['wpi_yoy']         = df['WPI']
+    feat['wpi_mom_vs_ma3m'] = df['WPI_MoM_vs_MA3M'] if 'WPI_MoM_vs_MA3M' in df.columns else (df['WPI'] - df['WPI'].rolling(63).mean()).bfill()
+    feat['real_rate_yoy']   = (df['RealRate'] - df['RealRate'].shift(252)).bfill()
+    feat['real_rate_mom']   = (df['RealRate'] - df['RealRate'].shift(21)).bfill()
+    feat['real_rate']       = feat['real_rate_mom']
     clean = feat.dropna()
     print(f"✓ Engineered {clean.shape[1]} features, {len(clean)} clean rows")
     return clean
@@ -774,9 +805,10 @@ def engineer_features(df):
 def select_features_for_hmm(feat, n_states=4):
     """
     Winning 11-Feature Economic & Market Regime Feature Set.
-    Selected from an exhaustive 7,680-combination Category Grid Search across all 36 engineered features
-    via strictly causal 8-fold walk-forward out-of-sample validation (#1 Rank, Chained OOS Sharpe: +0.7366,
-    Chained OOS CAGR: +23.48%, Profit Factor: 1.205, Mean Fold Sharpe: +0.8718).
+    Selected from an exhaustive 1,440-combination MoM MA & Difference Grid Search
+    via strictly causal 8-fold walk-forward out-of-sample validation (#1 Rank,
+    Chained OOS Sharpe: +0.5544, Chained OOS CAGR: +18.96%, IS Sharpe: 1.14, IS CAGR: 30.20%,
+    IS Max Drawdown: -18.89%).
 
     Features:
     - ret_5d_pct: 5-day rolling return percentage (suppresses 1-day microstructure noise)
@@ -788,8 +820,8 @@ def select_features_for_hmm(feat, n_states=4):
     - yield_curve: 10Y - 2Y sovereign yield curve spread (GoI / RBI)
     - cpi_yoy: All-India Combined CPI inflation YoY (MoSPI)
     - iip_yoy: Index of Industrial Production YoY growth (MoSPI)
-    - wpi_yoy: Wholesale Price Index YoY inflation (DPIIT)
-    - real_rate: Real policy repo rate 1-year YoY momentum (RBI Repo Rate − CPI)
+    - wpi_mom_vs_ma3m: Wholesale Price Index MoM % change minus 3-month MA surprise (DPIIT)
+    - real_rate_mom: Real policy repo rate 1-month (21-day) momentum (RBI Repo Rate − CPI)
     """
     cols = [
         'ret_5d_pct',
@@ -801,8 +833,8 @@ def select_features_for_hmm(feat, n_states=4):
         'yield_curve',
         'cpi_yoy',
         'iip_yoy',
-        'wpi_yoy',
-        'real_rate',
+        'wpi_mom_vs_ma3m',
+        'real_rate_mom',
     ]
     return feat[cols]
 

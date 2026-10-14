@@ -164,8 +164,8 @@ FEATURE_COLS = [
     'yield_curve',
     'cpi_yoy',
     'iip_yoy',
-    'wpi_yoy',
-    'real_rate',
+    'wpi_mom_vs_ma3m',
+    'real_rate_mom',
 ]
 
 
@@ -360,10 +360,17 @@ def fetch_full_market_data(start_date="2015-01-01"):
     wpi_data = fetch_india_wpi() if fetch_india_wpi is not None else fetch_wpi()
     if wpi_data is not None:
         wpi_data.index = wpi_data.index + pd.DateOffset(months=1)
-        wpi_daily = wpi_data.reindex(df.index, method='ffill')
-        df['WPI'] = wpi_daily
+        if isinstance(wpi_data, pd.DataFrame):
+            wpi_daily = wpi_data.reindex(df.index, method='ffill')
+            df['WPI'] = wpi_daily['WPI']
+            df['WPI_MoM_vs_MA3M'] = wpi_daily['WPI_MoM_vs_MA3M'].bfill()
+        else:
+            wpi_daily = wpi_data.reindex(df.index, method='ffill')
+            df['WPI'] = wpi_daily
+            df['WPI_MoM_vs_MA3M'] = (df['WPI'] - df['WPI'].rolling(63).mean()).bfill()
     else:
         df['WPI'] = np.nan
+        df['WPI_MoM_vs_MA3M'] = np.nan
 
     # Dynamic KNN Imputation anchored on Ret_1d, Vix, drawdown (k=5)
     if impute_macro_signals is not None:
@@ -445,12 +452,14 @@ def engineer_features(df):
     feat['vix_vs_ma20']  = df['VIX'] / df['VIX'].rolling(20).mean() - 1
     feat['vix_roc_5']    = df['VIX'].pct_change(5)
 
-    feat['yield_curve'] = df['YieldCurve']
-    feat['rate_spread'] = df['GSecYield10'] - df['RepoRate']
-    feat['cpi_yoy']     = df['CPI']
-    feat['iip_yoy']     = df['IIP']
-    feat['wpi_yoy']     = df['WPI']
-    feat['real_rate']   = (df['RealRate'] - df['RealRate'].shift(252)).bfill()
+    feat['yield_curve']     = df['YieldCurve']
+    feat['rate_spread']     = df['GSecYield10'] - df['RepoRate']
+    feat['cpi_yoy']         = df['CPI']
+    feat['iip_yoy']         = df['IIP']
+    feat['wpi_yoy']         = df['WPI']
+    feat['wpi_mom_vs_ma3m'] = df['WPI_MoM_vs_MA3M'] if 'WPI_MoM_vs_MA3M' in df.columns else (df['WPI'] - df['WPI'].rolling(63).mean()).bfill()
+    feat['real_rate_mom']   = (df['RealRate'] - df['RealRate'].shift(21)).bfill()
+    feat['real_rate']       = feat['real_rate_mom']
 
     clean = feat.dropna()
     return clean
