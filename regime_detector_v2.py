@@ -73,11 +73,11 @@ TC_STT       = 0.001   # 0.10% STT on sell-side (equity delivery)
 TC_SLIPPAGE  = 0.0005  # 0.05% market impact / slippage
 TC_TOTAL     = TC_STT + TC_SLIPPAGE   # applied on every regime switch
 
-# Capital protection parameters (-6% drawdown stop with T+0 execution + 10 SMA re-entry)
+# Capital protection parameters (-6% drawdown stop with T+0 execution + 20 SMA re-entry)
 STOP_LOSS_DD       = -0.06   # -6% portfolio drawdown stop to 100% Cash / Liquid (T+0 execution)
-STOP_REENTRY_MA    = 10      # 10-day Simple Moving Average on NIFTY 50
+STOP_REENTRY_MA    = 20      # 20-day Simple Moving Average on NIFTY 50
 STOP_REENTRY_TYPE  = 'SMA'   # 'EMA' or 'SMA'
-STOP_COOLDOWN_DAYS = 15      # Minimum 15 trading days in Cash before checking re-entry
+STOP_COOLDOWN_DAYS = 3      # Minimum 3 trading days in Cash before checking re-entry
 
 # Walk-forward parameters
 WF_TRAIN_YEARS  = 3   # years of history to train on
