@@ -232,11 +232,13 @@ def fetch_india_macro():
         'GSecShort': 'https://fred.stlouisfed.org/graph/fredgraph.csv?id=INDIR3TIB01STM',
     }
     series_dict = {}
+    cpi_raw_idx = pd.Series(dtype=float)
     for key, url in urls.items():
         try:
             d = pd.read_csv(url, index_col=0, parse_dates=True)
             s = pd.to_numeric(d.iloc[:, 0], errors='coerce').dropna()
             if key == 'CPI':
+                cpi_raw_idx = s.copy()
                 s = (s.pct_change(12) * 100).dropna()
             series_dict[key] = s
         except Exception:
@@ -254,6 +256,17 @@ def fetch_india_macro():
         cpi_hist = pd.concat([cpi_hist, mospi_cpi])
         cpi_hist = cpi_hist[~cpi_hist.index.duplicated(keep='last')].sort_index()
         print(f"  ✓ MoSPI CPI Inflation: {mospi_cpi.iloc[-1]:.2f}% ({mospi_cpi.index[-1].strftime('%b %Y')}) [source: api.mospi.gov.in]")
+
+        # Extend raw index using official MoSPI YoY inflation rates to compute true continuous MoM
+        if len(cpi_raw_idx) > 0:
+            for dt, yoy_val in mospi_cpi.items():
+                if dt > cpi_raw_idx.index[-1]:
+                    prev_yr_dt = dt - pd.DateOffset(years=1)
+                    if prev_yr_dt in cpi_raw_idx.index:
+                        cpi_raw_idx[dt] = cpi_raw_idx.loc[prev_yr_dt] * (1.0 + yoy_val / 100.0)
+            cpi_raw_idx = cpi_raw_idx.sort_index()
+
+    cpi_mom_hist = (cpi_raw_idx.pct_change(1) * 100).dropna() if len(cpi_raw_idx) > 1 else pd.Series(dtype=float)
 
     if mospi_iip is not None and len(mospi_iip) > 0:
         iip_hist = pd.concat([iip_hist, mospi_iip])
@@ -274,6 +287,7 @@ def fetch_india_macro():
     try:
         df_m = pd.DataFrame(index=all_dates)
         df_m['CPI_YoY']     = cpi_hist.reindex(all_dates).ffill().bfill()
+        df_m['CPI_MoM']     = cpi_mom_hist.reindex(all_dates).ffill().bfill() if len(cpi_mom_hist) > 0 else (df_m['CPI_YoY'].diff(1)).ffill().bfill()
         df_m['IIP_YoY']     = iip_hist.reindex(all_dates).ffill().bfill()
         df_m['RepoRate']    = repo_rate if repo_rate else (rate_hist.reindex(all_dates).ffill().bfill())
         df_m['GSecYield10'] = gsec10_hist.reindex(all_dates).ffill().bfill()
@@ -471,7 +485,7 @@ def fetch_india_wpi():
           f"{wpi_yoy.index[-1].strftime('%Y-%m')}) | Latest YoY: {wpi_yoy.iloc[-1]:.2f}% | "
           f"Latest MoM Surprise: {wpi_mom_vs_ma3m.iloc[-1]:+.2f}% [{series_label}]")
 
-    df_wpi = pd.DataFrame({'WPI': wpi_yoy, 'WPI_MoM_vs_MA3M': wpi_mom_vs_ma3m})
+    df_wpi = pd.DataFrame({'WPI': wpi_yoy, 'WPI_MoM': wpi_mom, 'WPI_MoM_vs_MA3M': wpi_mom_vs_ma3m})
     return df_wpi
 
 def impute_macro_signals(df):
@@ -481,7 +495,7 @@ def impute_macro_signals(df):
     Completely eliminates static hardcoded fallback numbers.
     """
     anchor_cols = ['Ret_1d', 'Vix', 'drawdown']
-    macro_cols = ['GSecYield10', 'GSecYield2', 'CPI', 'IIP', 'RepoRate', 'WPI', 'WPI_MoM_vs_MA3M']
+    macro_cols = ['GSecYield10', 'GSecYield2', 'CPI', 'CPI_MoM', 'IIP', 'RepoRate', 'WPI', 'WPI_MoM', 'WPI_MoM_vs_MA3M']
 
     # Ensure anchor features are populated
     if 'Ret_1d' not in df.columns:
@@ -599,12 +613,14 @@ def fetch_live_market_data(start_date="2015-01-01"):
         df['GSecYield10'] = macro_daily['GSecYield10']
         df['GSecYield2']  = macro_daily['GSecYield2']
         df['CPI']         = macro_daily['CPI_YoY']
+        df['CPI_MoM']     = macro_daily['CPI_MoM'] if 'CPI_MoM' in macro_daily.columns else np.nan
         df['IIP']         = macro_daily['IIP_YoY']
         df['RepoRate']    = macro_daily['RepoRate']
     else:
         df['GSecYield10'] = np.nan
         df['GSecYield2']  = np.nan
         df['CPI']         = np.nan
+        df['CPI_MoM']     = np.nan
         df['IIP']         = np.nan
         df['RepoRate']    = np.nan
 
@@ -616,13 +632,16 @@ def fetch_live_market_data(start_date="2015-01-01"):
         if isinstance(wpi_data, pd.DataFrame):
             wpi_daily = wpi_data.reindex(df.index, method='ffill')
             df['WPI'] = wpi_daily['WPI']
+            df['WPI_MoM'] = wpi_daily['WPI_MoM'].bfill() if 'WPI_MoM' in wpi_daily.columns else np.nan
             df['WPI_MoM_vs_MA3M'] = wpi_daily['WPI_MoM_vs_MA3M'].bfill()
         else:
             wpi_daily = wpi_data.reindex(df.index, method='ffill')
             df['WPI'] = wpi_daily
+            df['WPI_MoM'] = (df['WPI'] - df['WPI'].shift(21)).bfill()
             df['WPI_MoM_vs_MA3M'] = (df['WPI'] - df['WPI'].rolling(63).mean()).bfill()
     else:
         df['WPI'] = np.nan
+        df['WPI_MoM'] = np.nan
         df['WPI_MoM_vs_MA3M'] = np.nan
 
     # ── Dynamic KNN Imputation anchored on Ret_1d, Vix, drawdown (k=5) ──
@@ -1201,8 +1220,10 @@ def label_regimes(model, X_scaled, feat, df):
         'GSecYield10': df.loc[feat.index, 'GSecYield10'],
         'YieldCurve':  df.loc[feat.index, 'YieldCurve'],
         'CPI':         df.loc[feat.index, 'CPI'],
+        'CPI_MoM':     df.loc[feat.index, 'CPI_MoM'] if 'CPI_MoM' in df.columns else np.nan,
         'IIP':         df.loc[feat.index, 'IIP'],
         'WPI':         df.loc[feat.index, 'WPI'],
+        'WPI_MoM':     df.loc[feat.index, 'WPI_MoM'] if 'WPI_MoM' in df.columns else np.nan,
         'HMM_State':   states,
         'Regime':      decoded_labels,
         'RegimeColor': decoded_colors,
@@ -1219,7 +1240,7 @@ def label_regimes(model, X_scaled, feat, df):
 # 5. WALK-FORWARD VALIDATION
 # ══════════════════════════════════════════════════════════════════════
 
-def walk_forward_validation(feat, df, df_sec=None, learned_sector_mix=None, train_years=3, test_months=12, n_states=4, test_noise_std=0.0, random_seed=42):
+def walk_forward_validation(feat, df, df_sec=None, learned_sector_mix=None, train_years=WF_TRAIN_YEARS, test_months=WF_TEST_MONTHS, n_states=4, test_noise_std=0.0, random_seed=42):
     """
     Strictly causal walk-forward validation — no lookahead bias.
 
@@ -2566,17 +2587,19 @@ def plot_new_macro_signals(result, out_dir):
     ax.legend(fontsize=7, framealpha=0.3, facecolor='#0f0f11')
     ax.set_xlim(result.index[0], result.index[-1])
 
-    # 2. CPI & WPI Inflation
+    # 2. CPI & WPI Inflation (Month-on-Month)
     ax = fig.add_subplot(gs8[0, 1])
     ax.set_facecolor('#0f0f11')
     shade_regimes(ax)
-    ax.plot(result.index, result['CPI'], color='#f59e0b', lw=0.9, label='CPI YoY')
-    if 'WPI' in result.columns:
-        ax.plot(result.index, result['WPI'], color='#38bdf8', lw=0.9, label='WPI YoY (GoI)')
-    ax.axhline(4.0, color='#10b981', lw=0.7, ls='--', label='RBI target (4%)')
-    ax.axhline(6.0, color='#ef4444', lw=0.7, ls='--', label='Upper tolerance (6%)')
-    ax.set_title('CPI & WPI Inflation (%)\nRBI target: 4% ± 2%', fontsize=9, color='#9ca3af')
-    ax.set_ylabel('%', fontsize=8); ax.grid(True, lw=0.3)
+    cpi_plot = result['CPI_MoM'] if 'CPI_MoM' in result.columns else result['CPI']
+    ax.plot(result.index, cpi_plot, color='#f59e0b', lw=0.9, label='CPI MoM')
+    if 'WPI_MoM' in result.columns:
+        ax.plot(result.index, result['WPI_MoM'], color='#38bdf8', lw=0.9, label='WPI MoM (GoI)')
+    elif 'WPI' in result.columns:
+        ax.plot(result.index, result['WPI'], color='#38bdf8', lw=0.9, label='WPI (GoI)')
+    ax.axhline(0.0, color='#9ca3af', lw=0.6, ls='--', alpha=0.7)
+    ax.set_title('CPI & WPI Inflation (% MoM)\nMonth-on-Month Price Changes', fontsize=9, color='#9ca3af')
+    ax.set_ylabel('% MoM', fontsize=8); ax.grid(True, lw=0.3)
     ax.legend(fontsize=7, framealpha=0.3, facecolor='#0f0f11')
     ax.set_xlim(result.index[0], result.index[-1])
 
@@ -2609,13 +2632,16 @@ def plot_new_macro_signals(result, out_dir):
     ax = fig.add_subplot(gs8[1, 1])
     ax.set_facecolor('#0f0f11')
     regimes_order = ['Bull', 'Bear', 'HighVol', 'Sideways']
-    macro_cols = ['YieldCurve', 'CPI', 'WPI', 'IIP'] if 'WPI' in result.columns else ['YieldCurve', 'CPI', 'IIP']
+    macro_cols = ['YieldCurve', 'CPI_MoM', 'WPI_MoM', 'IIP'] if 'WPI_MoM' in result.columns else (
+        ['YieldCurve', 'CPI', 'WPI', 'IIP'] if 'WPI' in result.columns else ['YieldCurve', 'CPI', 'IIP']
+    )
+    label_map_macro = {'YieldCurve': 'YieldCurve', 'CPI_MoM': 'CPI MoM', 'WPI_MoM': 'WPI MoM', 'CPI': 'CPI', 'WPI': 'WPI', 'IIP': 'IIP'}
     x_pos = np.arange(len(regimes_order))
     w = 0.19
     line_colors = ['#a78bfa', '#f59e0b', '#38bdf8', '#34d399']
     for j, (col, lc) in enumerate(zip(macro_cols, line_colors)):
         means = [result.loc[result['Regime']==r, col].mean() for r in regimes_order]
-        ax.bar(x_pos + j*w, means, w, label=col, color=lc, alpha=0.8)
+        ax.bar(x_pos + j*w, means, w, label=label_map_macro.get(col, col), color=lc, alpha=0.8)
     ax.set_xticks(x_pos + w)
     ax.set_xticklabels(regimes_order, fontsize=9)
     ax.set_title('Mean Macro Signal\nby Regime', fontsize=9, color='#9ca3af')
