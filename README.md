@@ -742,7 +742,7 @@ python3 telegram_bot.py
 | **Bull** | **BANKBEES (37.1%), ITBEES (25.2%), AUTOBEES (11.5%), METALIETF (9.5%), INFRABEES (8.0%), PHARMABEES (5.2%), MOREALTY (3.5%)** | HDFC Bank, ICICI Bank, TCS, Infosys, Maruti, Tata Steel | Maximize compounding with cyclical momentum, tech growth & industrial leaders |
 | **Sideways** | **ITBEES (40.0%), MOREALTY (40.0%), PHARMABEES (20.0%)** | TCS, Infosys, DLF, Godrej Properties, Sun Pharma | Core compounding via technology exporters, real estate yields & defensive healthcare cash flows |
 | **HighVol** | **AUTOBEES (40.0%), CPSEETF (40.0%), METALIETF (20.0%)** | Maruti, M&M, ONGC, NTPC, Tata Steel, JSW Steel | Low-beta consumer auto compounders, high-dividend PSU cash cows & commodity hedges |
-| **Bear** | **PHARMABEES (40.0%), METALIETF (40.0%), CPSEETF (20.0%)** *(Target Equity: 0%)* | 100% Cash / LiquidBees | Complete capital protection; 100% liquid cash earning central bank repo rate |
+| **Bear** | **PHARMABEES (40.0%), METALIETF (40.0%), CPSEETF (20.0%)**  | Protective Sectors | Protective investments, consumer requisites |
 
 ---
 
