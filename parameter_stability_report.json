@@ -8,28 +8,28 @@
   },
   "baseline_performance": {
     "sharpe_ratio": 1.265,
-    "annualized_return_pct": 28.88,
+    "annualized_return_pct": 28.87,
     "max_drawdown_pct": -15.79
   },
   "benchmark_nifty_bh": {
-    "sharpe_ratio": 0.262,
-    "annualized_return_pct": 10.77,
+    "sharpe_ratio": 0.269,
+    "annualized_return_pct": 10.89,
     "max_drawdown_pct": -38.44
   },
   "plateau_neighborhood_3x3": {
     "mean_sharpe": 1.18,
     "std_sharpe": 0.077,
     "coefficient_of_variation_pct": 6.51,
-    "min_sharpe": 1.092,
+    "min_sharpe": 1.091,
     "max_sharpe": 1.265
   },
   "global_parameter_grid": {
-    "mean_sharpe": 0.988,
-    "std_sharpe": 0.099,
+    "mean_sharpe": 0.993,
+    "std_sharpe": 0.096,
     "min_sharpe": 0.861,
     "max_sharpe": 1.265,
-    "coefficient_of_variation_pct": 10.01,
+    "coefficient_of_variation_pct": 9.71,
     "pct_combinations_beating_bh": 100.0,
-    "worst_case_outperformance_vs_bh_pct": 228.9
+    "worst_case_outperformance_vs_bh_pct": 220.1
   }
 }
