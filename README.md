@@ -455,7 +455,7 @@ Across 2,000 stationary bootstrap trials on the Sector Rotation Strategy with Ca
 ### Frozen Model Architecture & Zero-Retraining Forward Testing
 - **Model Freezing**: The trained HMM model weights (`hmm_model.pkl`), feature scaler (`hmm_scaler.pkl`), state-to-regime mapping (`label_map.pkl`), and optimal sector allocations (`learned_sector_mix.json`) are **permanently frozen** on the freeze date (e.g., `11 Sep 2026`).
 - **No Retraining**: All subsequent trading days are treated as pure forward out-of-sample data. The model predicts the active regime sequentially using online causal forward decode (`online_forward_decode`) without updating its parameters.
-- **Rebalancing Rules**: Rebalancing executes **only when the inferred regime transitions** (e.g., `Bull` ➜ `Sideways`), with execution protected by the 5-day `MIN_HOLD_DAYS` lockout filter.
+- **Rebalancing Rules**: Rebalancing executes **only when the inferred regime transitions** (e.g., `Bull` ➜ `Sideways`), with execution protected by the 7-day `MIN_HOLD_DAYS` lockout filter.
 
 ### Embedded Capital Protection & Drawdown Tracking
 The live paper portfolio mirrors the backtest's risk management architecture:
