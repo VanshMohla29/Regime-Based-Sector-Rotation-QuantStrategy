@@ -1178,8 +1178,8 @@ def label_regimes(model, X_scaled, feat, df):
 
     # 3. Lowest VIX state -> Sideways (calm consolidation), remaining state with elevated VIX & inflation -> HighVol
     rem2_sorted_by_vol = sorted(rem2, key=lambda s: state_stats[s]['ann_vol'])
-    s_sideways = rem2_sorted_by_vol[1]
-    s_highvol = rem2_sorted_by_vol[0]
+    s_sideways = rem2_sorted_by_vol[0]
+    s_highvol = rem2_sorted_by_vol[1]
 
     explicit_map = {
         s_bull: 'Bull',

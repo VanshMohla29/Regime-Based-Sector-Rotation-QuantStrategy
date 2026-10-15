@@ -123,6 +123,10 @@ STOP_REENTRY_MA    = 20      # 20-day Simple Moving Average on NIFTY 50
 STOP_REENTRY_TYPE  = 'SMA'   # 'EMA' or 'SMA'
 STOP_COOLDOWN_DAYS = 3      # Minimum 3 trading days in Cash before checking re-entry
 
+# Trade execution timing: 'T+0' (same-day execution) or 'T+1' (next-day execution)
+# T+0 executes stop exit, re-entry, and regime rebalances on signal date itself
+EXECUTION_MODE     = os.getenv('PORTFOLIO_EXECUTION_MODE', 'T+0')
+
 REGIME_COLORS = {
     'Bull':     '#10b981',
     'Bear':     '#ef4444',
@@ -539,15 +543,90 @@ def smooth_regimes_causal(regime_series, min_hold=MIN_HOLD_DAYS):
 # 5. PAPER TRADING ENGINE
 # ══════════════════════════════════════════════════════════════════════
 
+def _execute_buy(cash, target_weights, available_etfs, prices_today):
+    """Allocate cash across available ETFs per target weights using whole integer units."""
+    if not target_weights:
+        return {}, {}, cash, 0.0
+    invest_amount = cash
+    orders = []
+    for etf in available_etfs:
+        w = target_weights.get(etf, 0.0)
+        if w > 0 and etf in prices_today and prices_today[etf] > 0:
+            target_alloc = invest_amount * w
+            price = prices_today[etf]
+            units = int(target_alloc // price)
+            if units > 0:
+                buy_value = units * price
+                buy_charges = compute_buy_charges(buy_value)
+                total_cost = buy_value + buy_charges
+                orders.append([etf, units, price, buy_value, buy_charges, total_cost])
+
+    total_order_cost = sum(o[5] for o in orders)
+    if total_order_cost > cash and orders:
+        while total_order_cost > cash and orders:
+            orders.sort(key=lambda o: o[3], reverse=True)
+            o = orders[0]
+            o[1] -= 1  # units
+            if o[1] > 0:
+                o[3] = o[1] * o[2]  # buy_value
+                o[4] = compute_buy_charges(o[3])  # buy_charges
+                o[5] = o[3] + o[4]  # total_cost
+            else:
+                orders.pop(0)
+            total_order_cost = sum(o[5] for o in orders)
+
+    new_holdings = {etf: 0 for etf in available_etfs}
+    new_cost_basis = {etf: 0.0 for etf in available_etfs}
+    total_buy_charges = 0.0
+    for etf, units, price, buy_value, buy_charges, total_cost in orders:
+        new_holdings[etf] = units
+        new_cost_basis[etf] = total_cost / units
+        cash -= total_cost
+        total_buy_charges += buy_charges
+
+    return new_holdings, new_cost_basis, cash, total_buy_charges
+
+
+def _execute_sell(holdings, cost_basis, available_etfs, prices_today):
+    """Liquidate all current ETF holdings to cash at current prices."""
+    n_scrips_sold = 0
+    sell_turnover = 0.0
+    realized_gain = 0.0
+    for etf in available_etfs:
+        if holdings.get(etf, 0) > 0 and etf in prices_today:
+            sell_value = holdings[etf] * prices_today[etf]
+            realized_gain += sell_value - (cost_basis.get(etf, 0.0) * holdings[etf])
+            sell_turnover += sell_value
+            n_scrips_sold += 1
+            holdings[etf] = 0
+            cost_basis[etf] = 0.0
+
+    sell_charges = 0.0
+    cash_proceeds = 0.0
+    if sell_turnover > 0:
+        sell_charges = compute_sell_charges(sell_turnover, n_scrips=n_scrips_sold)
+        cash_proceeds = sell_turnover - sell_charges
+
+    return cash_proceeds, sell_charges, realized_gain
+
+
 def run_paper_trading(df, feat, regimes, regime_posteriors, etf_prices,
-                      sector_mix, freeze_date, initial_capital=INITIAL_CAPITAL):
+                      sector_mix, freeze_date, initial_capital=INITIAL_CAPITAL,
+                      execution_mode=EXECUTION_MODE):
     """
     Simulate a paper trading portfolio from freeze_date onwards.
+
+    Supports both 'T+0' (same-day execution) and 'T+1' (next-day execution)
+    timing for stop exits, re-entry, and regime rebalancing.
 
     Returns a DataFrame with daily portfolio state:
       Date, Regime, NAV, Cash, Equity_Value, Drawdown, Daily_Return,
       per-ETF positions (units & value), rebalance flags
     """
+    execution_mode = str(execution_mode).upper()
+    if execution_mode not in ('T+0', 'T+1'):
+        execution_mode = 'T+0'
+
     # Filter to dates AFTER freeze_date
     oos_dates = feat.index[feat.index > freeze_date]
     if len(oos_dates) == 0:
@@ -560,7 +639,7 @@ def run_paper_trading(df, feat, regimes, regime_posteriors, etf_prices,
         print("❌ No overlapping dates between market data and ETF prices.")
         return pd.DataFrame()
 
-    print(f"\n[Paper Trading] Simulating from {common_dates[0].strftime('%d %b %Y')} to {common_dates[-1].strftime('%d %b %Y')} ({len(common_dates)} sessions)")
+    print(f"\n[Paper Trading] Simulating from {common_dates[0].strftime('%d %b %Y')} to {common_dates[-1].strftime('%d %b %Y')} ({len(common_dates)} sessions | Execution: {execution_mode})")
 
     etf_names = list(ETF_TICKERS.keys())
     available_etfs = [e for e in etf_names if e in etf_prices.columns and etf_prices[e].notna().any()]
@@ -572,16 +651,18 @@ def run_paper_trading(df, feat, regimes, regime_posteriors, etf_prices,
     cost_basis = {etf: 0.0 for etf in available_etfs}      # weighted avg buy price
     realized_gains = 0.0                                    # cumulative realized P&L
     total_charges_paid = 0.0                                # cumulative txn costs
-    peak_nav = initial_capital
+    max_portfolio_nav = initial_capital                     # All-time peak NAV of portfolio (never reset downwards)
+    stop_peak_nav = initial_capital                         # Cycle peak NAV for trailing stop-loss check
 
     current_regime = None
     hold_days_since_rebalance = 0
 
-    # Capital protection stop tracking (-12% DD stop + 200 SMA re-entry)
+    # Capital protection stop tracking
     in_cash = False
     days_in_cash = 0
     exit_next_day = False
     reenter_next_day = False
+    pending_rebalance = None
 
     if STOP_REENTRY_TYPE == 'EMA':
         ma_filter = df['NIFTY'].ewm(span=STOP_REENTRY_MA, adjust=False).mean()
@@ -609,81 +690,56 @@ def run_paper_trading(df, feat, regimes, regime_posteriors, etf_prices,
         rebalanced = False
         day_charges = 0.0
 
-        # ── 1. Check if Stop Exit was triggered on previous day ──
-        if exit_next_day:
-            in_cash = True
-            exit_next_day = False
-            days_in_cash = 0
-            # Liquidate all remaining ETF holdings to cash
-            n_scrips_sold = 0
-            sell_turnover = 0.0
-            for etf in available_etfs:
-                if holdings[etf] > 0 and etf in prices_today:
-                    sell_value = holdings[etf] * prices_today[etf]
-                    gain = sell_value - (cost_basis[etf] * holdings[etf])
-                    realized_gains += gain
-                    sell_turnover += sell_value
-                    n_scrips_sold += 1
-                    holdings[etf] = 0
-                    cost_basis[etf] = 0.0
-
-            if sell_turnover > 0:
-                sell_charges = compute_sell_charges(sell_turnover, n_scrips=n_scrips_sold)
-                cash += sell_turnover - sell_charges
-                day_charges += sell_charges
-                total_charges_paid += sell_charges
-
-            current_regime = f"CASH (STOP {int(STOP_LOSS_DD*100)}%)"
-            rebalanced = True
-
-        # ── 2. Check if Re-entry was triggered on previous day ──
-        elif reenter_next_day:
-            in_cash = False
-            reenter_next_day = False
-            target_weights = sector_mix.get(day_regime, {})
-            if target_weights:
-                invest_amount = cash
-                orders = []
-                for etf in available_etfs:
-                    w = target_weights.get(etf, 0.0)
-                    if w > 0 and etf in prices_today and prices_today[etf] > 0:
-                        target_alloc = invest_amount * w
-                        price = prices_today[etf]
-                        units = int(target_alloc // price)
-                        if units > 0:
-                            buy_value = units * price
-                            buy_charges = compute_buy_charges(buy_value)
-                            total_cost = buy_value + buy_charges
-                            orders.append((etf, units, price, buy_value, buy_charges, total_cost))
-
-                total_order_cost = sum(o[5] for o in orders)
-                if total_order_cost > cash and orders:
-                    while total_order_cost > cash and orders:
-                        orders.sort(key=lambda o: o[3], reverse=True)
-                        etf, units, price, bv, bc, tc = orders[0]
-                        units -= 1
-                        if units > 0:
-                            bv = units * price
-                            bc = compute_buy_charges(bv)
-                            tc = bv + bc
-                            orders[0] = (etf, units, price, bv, bc, tc)
-                        else:
-                            orders.pop(0)
-                        total_order_cost = sum(o[5] for o in orders)
-
-                for etf, units, price, buy_value, buy_charges, total_cost in orders:
-                    holdings[etf] = units
-                    cost_basis[etf] = total_cost / units
-                    cash -= total_cost
-                    day_charges += buy_charges
-
-                total_charges_paid += day_charges
-                current_regime = day_regime
-                hold_days_since_rebalance = 0
+        # ── 1. T+1 Execution Check: previous day pending actions ──
+        if execution_mode == 'T+1':
+            if exit_next_day:
+                cash_proceeds, sell_chg, gain = _execute_sell(holdings, cost_basis, available_etfs, prices_today)
+                cash += cash_proceeds
+                day_charges += sell_chg
+                total_charges_paid += sell_chg
+                realized_gains += gain
+                in_cash = True
+                exit_next_day = False
+                days_in_cash = 0
+                current_regime = f"CASH (STOP {int(STOP_LOSS_DD*100)}%)"
                 rebalanced = True
-                peak_nav = cash + sum(holdings[e] * prices_today.get(e, 0) for e in available_etfs)
 
-        # ── 3. Handle cash yield and re-entry condition while in cash ──
+            elif reenter_next_day:
+                target_weights = sector_mix.get(day_regime, {})
+                if target_weights:
+                    new_h, new_cb, cash, buy_chg = _execute_buy(cash, target_weights, available_etfs, prices_today)
+                    holdings.update(new_h)
+                    cost_basis.update(new_cb)
+                    day_charges += buy_chg
+                    total_charges_paid += buy_chg
+                    in_cash = False
+                    reenter_next_day = False
+                    current_regime = day_regime
+                    hold_days_since_rebalance = 0
+                    rebalanced = True
+                    stop_peak_nav = cash + sum(holdings[e] * prices_today.get(e, 0) for e in available_etfs)
+
+            elif pending_rebalance is not None:
+                target_regime = pending_rebalance
+                pending_rebalance = None
+                target_weights = sector_mix.get(target_regime, {})
+                if target_weights:
+                    cash_proceeds, sell_chg, gain = _execute_sell(holdings, cost_basis, available_etfs, prices_today)
+                    cash += cash_proceeds
+                    day_charges += sell_chg
+                    total_charges_paid += sell_chg
+                    realized_gains += gain
+
+                    new_h, new_cb, cash, buy_chg = _execute_buy(cash, target_weights, available_etfs, prices_today)
+                    holdings.update(new_h)
+                    cost_basis.update(new_cb)
+                    day_charges += buy_chg
+                    total_charges_paid += buy_chg
+                    current_regime = target_regime
+                    hold_days_since_rebalance = 0
+                    rebalanced = True
+
+        # ── 2. Handle Cash Yield and Re-entry Condition while in Cash ──
         if in_cash:
             repo_rate = float(df.loc[date, 'RepoRate']) if ('RepoRate' in df.columns and not pd.isna(df.loc[date, 'RepoRate'])) else 6.50
             daily_repo = repo_rate / 100.0 / 252.0
@@ -693,78 +749,73 @@ def run_paper_trading(df, feat, regimes, regime_posteriors, etf_prices,
             nifty_price = float(df.loc[date, 'NIFTY']) if date in df.index else 0.0
             ma_val = float(ma_filter.loc[date]) if date in ma_filter.index else 0.0
             if nifty_price > ma_val and days_in_cash >= STOP_COOLDOWN_DAYS:
-                reenter_next_day = True
+                if execution_mode == 'T+0':
+                    # ── T+0 Execution: Immediate re-entry into sector mix on date itself ──
+                    target_weights = sector_mix.get(day_regime, {})
+                    if target_weights:
+                        new_h, new_cb, cash, buy_chg = _execute_buy(cash, target_weights, available_etfs, prices_today)
+                        holdings.update(new_h)
+                        cost_basis.update(new_cb)
+                        day_charges += buy_chg
+                        total_charges_paid += buy_chg
+                        in_cash = False
+                        days_in_cash = 0
+                        reenter_next_day = False
+                        current_regime = day_regime
+                        hold_days_since_rebalance = 0
+                        rebalanced = True
+                        stop_peak_nav = cash + sum(holdings[e] * prices_today.get(e, 0) for e in available_etfs)
+                else:
+                    reenter_next_day = True
 
-        # ── 4. Regular Regime-driven rebalance (only when active / not in cash) ──
-        elif current_regime is None or (day_regime != current_regime and hold_days_since_rebalance >= MIN_HOLD_DAYS):
+        # ── 3. Regular Regime-Driven Rebalance (only when active / not in cash) ──
+        elif current_regime is None:
+            # Initial allocation on freeze date
             target_weights = sector_mix.get(day_regime, {})
             if target_weights:
-                # ── SELL all current holdings ──
-                n_scrips_sold = 0
-                sell_turnover = 0.0
-                for etf in available_etfs:
-                    if holdings[etf] > 0 and etf in prices_today:
-                        sell_value = holdings[etf] * prices_today[etf]
-                        gain = sell_value - (cost_basis[etf] * holdings[etf])
-                        realized_gains += gain
-                        sell_turnover += sell_value
-                        n_scrips_sold += 1
-                        holdings[etf] = 0
-                        cost_basis[etf] = 0.0
-
-                if sell_turnover > 0:
-                    sell_charges = compute_sell_charges(sell_turnover, n_scrips=n_scrips_sold)
-                    cash += sell_turnover - sell_charges
-                    day_charges += sell_charges
-                elif current_regime is None:
-                    pass  # initial allocation, no sells
-
-                # ── BUY new positions (whole units only, floor) ──
-                invest_amount = cash
-                orders = []
-                for etf in available_etfs:
-                    w = target_weights.get(etf, 0.0)
-                    if w > 0 and etf in prices_today and prices_today[etf] > 0:
-                        target_alloc = invest_amount * w
-                        price = prices_today[etf]
-                        units = int(target_alloc // price)
-                        if units > 0:
-                            buy_value = units * price
-                            buy_charges = compute_buy_charges(buy_value)
-                            total_cost = buy_value + buy_charges
-                            orders.append((etf, units, price, buy_value, buy_charges, total_cost))
-
-                total_order_cost = sum(o[5] for o in orders)
-                if total_order_cost > cash and orders:
-                    while total_order_cost > cash and orders:
-                        orders.sort(key=lambda o: o[3], reverse=True)
-                        etf, units, price, bv, bc, tc = orders[0]
-                        units -= 1
-                        if units > 0:
-                            bv = units * price
-                            bc = compute_buy_charges(bv)
-                            tc = bv + bc
-                            orders[0] = (etf, units, price, bv, bc, tc)
-                        else:
-                            orders.pop(0)
-                        total_order_cost = sum(o[5] for o in orders)
-
-                for etf, units, price, buy_value, buy_charges, total_cost in orders:
-                    holdings[etf] = units
-                    cost_basis[etf] = total_cost / units
-                    cash -= total_cost
-                    day_charges += buy_charges
-
-                total_charges_paid += day_charges
+                new_h, new_cb, cash, buy_chg = _execute_buy(cash, target_weights, available_etfs, prices_today)
+                holdings.update(new_h)
+                cost_basis.update(new_cb)
+                day_charges += buy_chg
+                total_charges_paid += buy_chg
                 current_regime = day_regime
                 hold_days_since_rebalance = 0
                 rebalanced = True
+                stop_peak_nav = cash + sum(holdings[e] * prices_today.get(e, 0) for e in available_etfs)
+
+        elif day_regime != current_regime and hold_days_since_rebalance >= MIN_HOLD_DAYS:
+            if execution_mode == 'T+0':
+                # ── T+0 Execution: Immediate rebalance on date itself ──
+                target_weights = sector_mix.get(day_regime, {})
+                if target_weights:
+                    cash_proceeds, sell_chg, gain = _execute_sell(holdings, cost_basis, available_etfs, prices_today)
+                    cash += cash_proceeds
+                    day_charges += sell_chg
+                    total_charges_paid += sell_chg
+                    realized_gains += gain
+
+                    new_h, new_cb, cash, buy_chg = _execute_buy(cash, target_weights, available_etfs, prices_today)
+                    holdings.update(new_h)
+                    cost_basis.update(new_cb)
+                    day_charges += buy_chg
+                    total_charges_paid += buy_chg
+                    current_regime = day_regime
+                    hold_days_since_rebalance = 0
+                    rebalanced = True
+            else:
+                # ── T+1 Execution: Queue rebalance for next trading day ──
+                pending_rebalance = day_regime
+                hold_days_since_rebalance += 1
         else:
             hold_days_since_rebalance += 1
 
-        # ── 5. Mark to market & Drawdown evaluation ──
+        # ── 4. Mark to Market & Drawdown Evaluation ──
         equity_value = sum(holdings[etf] * prices_today.get(etf, 0) for etf in available_etfs)
         portfolio_nav = cash + equity_value
+
+        # True portfolio drawdown from all-time peak NAV of the portfolio (never reset downwards)
+        max_portfolio_nav = max(max_portfolio_nav, portfolio_nav)
+        drawdown = (portfolio_nav - max_portfolio_nav) / max_portfolio_nav if max_portfolio_nav > 0 else 0.0
 
         # Compute unrealized gain for tax tracking
         unrealized_gains = 0.0
@@ -773,38 +824,29 @@ def run_paper_trading(df, feat, regimes, regime_posteriors, etf_prices,
                 unrealized_gains += (prices_today[etf] - cost_basis[etf]) * holdings[etf]
 
         if not in_cash:
-            peak_nav = max(peak_nav, portfolio_nav)
-            drawdown = (portfolio_nav - peak_nav) / peak_nav if peak_nav > 0 else 0.0
-            if drawdown <= STOP_LOSS_DD:
-                # ── T+0 Execution: execute as soon as dd = -12% on date itself ──
-                n_scrips_sold = 0
-                sell_turnover = 0.0
-                for etf in available_etfs:
-                    if holdings[etf] > 0 and etf in prices_today:
-                        sell_value = holdings[etf] * prices_today[etf]
-                        gain = sell_value - (cost_basis[etf] * holdings[etf])
-                        realized_gains += gain
-                        sell_turnover += sell_value
-                        n_scrips_sold += 1
-                        holdings[etf] = 0
-                        cost_basis[etf] = 0.0
-
-                if sell_turnover > 0:
-                    sell_charges = compute_sell_charges(sell_turnover, n_scrips=n_scrips_sold)
-                    cash += sell_turnover - sell_charges
-                    day_charges += sell_charges
-                    total_charges_paid += sell_charges
-
-                in_cash = True
-                exit_next_day = False
-                current_regime = f"CASH (STOP {int(STOP_LOSS_DD*100)}%)"
-                rebalanced = True
-                days_in_cash = 0
-                equity_value = 0.0
-                portfolio_nav = cash
-                unrealized_gains = 0.0
-        else:
-            drawdown = (portfolio_nav - peak_nav) / peak_nav if peak_nav > 0 else 0.0
+            # Trailing stop-loss checks drawdown from cycle peak
+            stop_peak_nav = max(stop_peak_nav, portfolio_nav)
+            stop_dd = (portfolio_nav - stop_peak_nav) / stop_peak_nav if stop_peak_nav > 0 else 0.0
+            if stop_dd <= STOP_LOSS_DD:
+                if execution_mode == 'T+0':
+                    # ── T+0 Execution: execute stoploss immediately on date itself ──
+                    cash_proceeds, sell_chg, gain = _execute_sell(holdings, cost_basis, available_etfs, prices_today)
+                    cash += cash_proceeds
+                    day_charges += sell_chg
+                    total_charges_paid += sell_chg
+                    realized_gains += gain
+                    in_cash = True
+                    exit_next_day = False
+                    current_regime = f"CASH (STOP {int(STOP_LOSS_DD*100)}%)"
+                    rebalanced = True
+                    days_in_cash = 0
+                    equity_value = 0.0
+                    portfolio_nav = cash
+                    unrealized_gains = 0.0
+                    # Recompute drawdown from all-time max NAV
+                    drawdown = (portfolio_nav - max_portfolio_nav) / max_portfolio_nav if max_portfolio_nav > 0 else 0.0
+                else:
+                    exit_next_day = True
 
         # Posterior probabilities for this date
         bull_p = regime_posteriors.loc[date, 'Bull'] if date in regime_posteriors.index else 0
@@ -819,12 +861,15 @@ def run_paper_trading(df, feat, regimes, regime_posteriors, etf_prices,
         record = {
             'Date': date,
             'Regime': current_regime if in_cash else day_regime,
+            'Market_Regime': day_regime,
             'Rebalanced': rebalanced,
             'NAV': portfolio_nav,
+            'Peak_NAV': max_portfolio_nav,
             'Cash': cash,
             'Equity': equity_value,
             'Drawdown': drawdown,
             'In_Cash': in_cash,
+            'Execution_Mode': execution_mode,
             'NIFTY': nifty_price,
             'MA_Filter': ma_val,
             'EMA_10': float(ema_10.loc[date]) if date in ema_10.index else ma_val,
@@ -936,8 +981,9 @@ def plot_paper_portfolio(history, sector_mix, freeze_date, out_dir):
         'text.color':       '#e5e7eb',
     })
 
+    exec_mode = history['Execution_Mode'].iloc[-1] if 'Execution_Mode' in history.columns else EXECUTION_MODE
     fig = plt.figure(figsize=(22, 18))
-    fig.suptitle('INDIA HMM REGIME DETECTOR  ·  LIVE PAPER TRADING PORTFOLIO (FROZEN MODEL — OOS)',
+    fig.suptitle(f'INDIA HMM REGIME DETECTOR  ·  LIVE PAPER TRADING PORTFOLIO ({exec_mode} EXECUTION — FROZEN MODEL)',
                  fontsize=13, fontweight='bold', color='#f9fafb', y=0.98)
 
     gs = gridspec.GridSpec(4, 2, figure=fig, hspace=0.35, wspace=0.25,
@@ -948,10 +994,13 @@ def plot_paper_portfolio(history, sector_mix, freeze_date, out_dir):
     # ── Panel 1: Portfolio NAV vs NIFTY Benchmark (top, full width) ──
     ax1 = fig.add_subplot(gs[0, :])
 
-    # Regime shading
+    # Regime shading (strictly as per current market regime, never defaulted to Sideways on stop hit)
     for i in range(len(dates)):
-        reg = history['Regime'].iloc[i]
-        color = REGIME_COLORS.get(reg, '#3b82f6')
+        reg = history['Market_Regime'].iloc[i] if 'Market_Regime' in history.columns else history['Regime'].iloc[i]
+        if 'CASH' in str(reg):
+            probs = {r: history[r].iloc[i] for r in ('Bull', 'Bear', 'HighVol', 'Sideways') if r in history.columns}
+            reg = max(probs, key=probs.get) if probs else 'HighVol'
+        color = REGIME_COLORS.get(reg, '#f59e0b')
         if i < len(dates) - 1:
             ax1.axvspan(dates[i], dates[i+1], alpha=0.12, color=color, zorder=0)
 
@@ -1140,7 +1189,7 @@ def plot_paper_portfolio(history, sector_mix, freeze_date, out_dir):
 
     summary_text = (
         f"  OOS PERIOD: {history.index[0].strftime('%d %b %Y')} → {history.index[-1].strftime('%d %b %Y')} ({n_days} trading days)  |  "
-        f"MODEL FROZEN: {freeze_date.strftime('%d %b %Y')}  |  ACTIVE REGIME: [{curr_regime.upper()}]\n\n"
+        f"MODEL FROZEN: {freeze_date.strftime('%d %b %Y')}  |  EXECUTION: [{exec_mode}]  |  ACTIVE REGIME: [{curr_regime.upper()}]\n\n"
         f"  Portfolio Return: {total_ret:+.2f}%    |    NIFTY 50 Return: {nifty_ret:+.2f}%    |    "
         f"Alpha: {total_ret - nifty_ret:+.2f}%    |    "
         f"Sharpe: {sharpe:.2f}    |    Ann. Vol: {ann_vol:.1f}%    |    "
@@ -1171,8 +1220,16 @@ def plot_paper_portfolio(history, sector_mix, freeze_date, out_dir):
 # ══════════════════════════════════════════════════════════════════════
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="Live Paper Trading Portfolio (Frozen Model)")
+    parser.add_argument('--execution', choices=['T+0', 'T+1'],
+                        default=os.getenv('PORTFOLIO_EXECUTION_MODE', EXECUTION_MODE),
+                        help="Trade execution timing: 'T+0' (same-day) or 'T+1' (next-day). Default: T+0")
+    args, _ = parser.parse_known_args()
+    exec_mode = args.execution
+
     print("=" * 70)
-    print("  INDIA HMM REGIME DETECTOR  —  LIVE PAPER TRADING (FROZEN MODEL)")
+    print(f"  INDIA HMM REGIME DETECTOR  —  LIVE PAPER TRADING (EXECUTION: {exec_mode})")
     print("  No retraining. All new data = pure out-of-sample testing.")
     print("=" * 70)
 
@@ -1219,10 +1276,11 @@ def main():
     etf_prices = fetch_etf_prices(start_date=etf_start)
 
     # 6. Run paper trading simulation
-    print("\n[6] Running paper trading simulation...")
+    print(f"\n[6] Running paper trading simulation (Execution Mode: {exec_mode})...")
     history = run_paper_trading(
         df, feat, regimes, regime_posteriors, etf_prices,
-        sector_mix, freeze_date, initial_capital=INITIAL_CAPITAL
+        sector_mix, freeze_date, initial_capital=INITIAL_CAPITAL,
+        execution_mode=exec_mode
     )
 
     if len(history) > 0:
@@ -1243,6 +1301,7 @@ def main():
         print(f"  Total Return: {total_ret:+.2f}%")
         print(f"  Max Drawdown: {max_dd:.2f}%")
         print(f"  Stop Status : {stop_status}")
+        print(f"  Execution   : {exec_mode} ({'immediate same-day' if exec_mode == 'T+0' else 'next-day'})")
         print(f"  Re-entry MA : {STOP_REENTRY_MA} {STOP_REENTRY_TYPE} (NIFTY 50)")
         print(f"  Regime      : {history['Regime'].iloc[-1]}")
         total_chg = history['Total_Charges'].iloc[-1] if 'Total_Charges' in history.columns else 0
