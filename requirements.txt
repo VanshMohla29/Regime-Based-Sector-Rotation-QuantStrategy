@@ -1,0 +1,32 @@
+# ─────────────────────────────────────────────────────────────────────
+# Runtime dependencies — India Market Regime Detector
+# Pinned to the exact versions the test-suite is run against (Python 3.13).
+# ─────────────────────────────────────────────────────────────────────
+
+# Numerical / data stack
+numpy==2.4.4
+pandas==3.0.2
+scipy==1.17.1
+scikit-learn==1.8.0
+hmmlearn==0.3.3
+matplotlib==3.10.8
+
+# Market + macro data ingestion
+yfinance==1.3.0
+requests==2.32.5
+beautifulsoup4==4.14.3
+lxml==6.1.3
+openpyxl==3.1.5
+xlrd==2.0.2
+python-dateutil==2.9.0.post0
+
+# Configuration
+python-dotenv==1.2.1
+
+# REST API (regime_api.py)
+fastapi==0.141.1
+pydantic==2.12.4
+uvicorn==0.49.0
+
+# Telegram alert bot (telegram_bot.py)
+python-telegram-bot==22.8

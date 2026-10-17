@@ -1,0 +1,34 @@
+services:
+  # REST API serving the frozen HMM model  ->  http://localhost:8000/docs
+  api:
+    build:
+      context: .
+      target: runtime
+    image: regime-detector:latest
+    ports:
+      - "8000:8000"
+    env_file:
+      - path: .env
+        required: false
+    restart: unless-stopped
+
+  # Telegram alert bot (needs TELEGRAM_BOT_TOKEN in .env)
+  #   docker compose --profile alerts up -d bot
+  bot:
+    image: regime-detector:latest
+    depends_on:
+      - api
+    command: ["python", "telegram_bot.py"]
+    env_file:
+      - path: .env
+        required: false
+    restart: unless-stopped
+    profiles: ["alerts"]
+
+  # Run the full test-suite in a clean container
+  #   docker compose --profile test run --rm tests
+  tests:
+    build:
+      context: .
+      target: test
+    profiles: ["test"]

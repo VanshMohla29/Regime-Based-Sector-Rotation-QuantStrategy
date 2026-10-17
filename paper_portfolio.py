@@ -904,7 +904,7 @@ def run_paper_trading(df, feat, regimes, regime_posteriors, etf_prices,
     if len(history) > 0:
         history.set_index('Date', inplace=True)
         history['Daily_Return'] = history['NAV'].pct_change().fillna(0)
-        history['Daily_Return'].iloc[0] = (history['NAV'].iloc[0] / initial_capital) - 1
+        history.loc[history.index[0], 'Daily_Return'] = (history['NAV'].iloc[0] / initial_capital) - 1
         history['Cumulative_Return'] = (history['NAV'] / initial_capital - 1) * 100
         # NIFTY benchmark rebased
         if 'NIFTY' in history.columns:

@@ -1,0 +1,28 @@
+# Keep secrets, VCS data and bulky/generated files out of the build context
+.git
+.github
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+.venv/
+venv/
+
+output/
+scratch/
+*.log
+*.png
+.DS_Store
+
+# local backups
+*_backup.py
+*BACKUP*

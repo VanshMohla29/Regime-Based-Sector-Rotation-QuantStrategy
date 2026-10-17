@@ -708,7 +708,7 @@ python3 -m venv venv
 source venv/bin/activate
 
 # Install required dependencies
-pip install numpy pandas matplotlib scipy scikit-learn hmmlearn yfinance fastapi uvicorn requests python-telegram-bot openpyxl xlrd
+pip install -r requirements.txt
 ```
 
 ### 2. Run the Full Model Pipeline
@@ -731,6 +731,36 @@ uvicorn regime_api:app --host 0.0.0.0 --port 8000
 # Start the Interactive Telegram Bot
 python3 telegram_bot.py
 ```
+
+### 5. Automated Tests, CI/CD & Containers
+```bash
+pip install -r requirements-dev.txt
+
+pytest                      # full suite (~4 s, fully offline — no market-data calls)
+pytest -m "not slow"        # skip HMM-training / walk-forward tests
+make cov                    # with coverage report
+ruff check .                # lint
+
+# Containers
+docker compose up -d --build api                 # API on http://localhost:8000/docs
+docker compose --profile alerts up -d bot        # Telegram bot (needs .env)
+docker compose --profile test run --rm tests     # run the suite in a clean container
+```
+
+| Test area | What it proves |
+|---|---|
+| `tests/unit/test_regime_smoothing.py` | Whipsaw filter holds every regime ≥ `MIN_HOLD_DAYS`, never uses future data, and both copies (`regime_detector_v2` / `paper_portfolio`) stay identical |
+| `tests/unit/test_online_decode.py` | Forward decoder is causal: decoding a prefix equals the prefix of decoding everything |
+| `tests/unit/test_stop_loss_rotation.py` | -6% stop caps the loss at the stop level, 3-day cooldown, SMA re-entry, T+1 signal lag |
+| `tests/unit/test_paper_trading_engine.py` | T+0 vs T+1 stop timing, same-day re-entry, drawdown measured from all-time peak NAV, NAV = cash + equity |
+| `tests/unit/test_trade_execution.py` | NSE charge arithmetic, no overdrafts, whole units, round-trip cost |
+| `tests/unit/test_transmat_regularization.py` | No absorbing HMM states; rows stay stochastic |
+| `tests/unit/test_feature_engineering.py` | Features are causal; training/serving feature order cannot drift |
+| `tests/integration/test_hmm_pipeline.py` | Walk-forward fold 0 is bit-identical when future data is deleted **or poisoned** (no lookahead) |
+| `tests/integration/test_frozen_artifacts.py` | Committed model / scaler / label map / sector mix satisfy the contract the API relies on |
+| `tests/integration/test_regime_api.py` | Endpoints, validation errors, and feature-vector ordering |
+
+GitHub Actions (`.github/workflows/ci.yml`) runs lint → tests + coverage → Docker build and a `/health` smoke test on every push and pull request.
 
 ---
 

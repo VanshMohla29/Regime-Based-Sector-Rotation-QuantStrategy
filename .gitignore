@@ -40,3 +40,10 @@ output
 # Cache files
 sector_returns_cache.csv
 
+# Test & lint tooling artifacts
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+

@@ -1,0 +1,52 @@
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra --strict-markers --strict-config"
+markers = [
+    "slow: trains HMMs / runs multi-fold walk-forward (deselect with -m 'not slow')",
+    "integration: exercises several modules or the HTTP API together",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::FutureWarning",
+    "ignore::UserWarning",
+]
+
+[tool.coverage.run]
+source = ["."]
+branch = true
+omit = [
+    "tests/*",
+    "parameter_stability_test.py",
+    "*_backup.py",
+    "scratch/*",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+]
+
+[tool.ruff]
+line-length = 140
+target-version = "py313"
+extend-exclude = [
+    "regime_detector_v2_backup.py",
+    "paper_portfolio_backup.py",
+    "scratch",
+    "output",
+]
+
+[tool.ruff.lint]
+# Correctness-focused rule set (pyflakes + pycodestyle errors). Style-only rules
+# are intentionally omitted so the existing research code isn't churned.
+select = ["E9", "F"]
+ignore = [
+    "F401",   # unused imports — several modules re-export / lazily import
+    "F841",   # unused local variables in research scripts
+    "F541",   # f-strings without placeholders
+]
