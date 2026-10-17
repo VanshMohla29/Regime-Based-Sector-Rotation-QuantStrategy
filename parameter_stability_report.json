@@ -12,8 +12,8 @@
     "max_drawdown_pct": -15.79
   },
   "benchmark_nifty_bh": {
-    "sharpe_ratio": 0.272,
-    "annualized_return_pct": 10.95,
+    "sharpe_ratio": 0.271,
+    "annualized_return_pct": 10.94,
     "max_drawdown_pct": -38.44
   },
   "plateau_neighborhood_3x3": {
@@ -24,12 +24,12 @@
     "max_sharpe": 1.265
   },
   "global_parameter_grid": {
-    "mean_sharpe": 0.993,
-    "std_sharpe": 0.096,
+    "mean_sharpe": 0.992,
+    "std_sharpe": 0.097,
     "min_sharpe": 0.861,
     "max_sharpe": 1.265,
-    "coefficient_of_variation_pct": 9.69,
+    "coefficient_of_variation_pct": 9.75,
     "pct_combinations_beating_bh": 100.0,
-    "worst_case_outperformance_vs_bh_pct": 216.8
+    "worst_case_outperformance_vs_bh_pct": 217.3
   }
 }

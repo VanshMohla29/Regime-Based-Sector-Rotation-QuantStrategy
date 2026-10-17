@@ -2948,7 +2948,7 @@ def main():
     fig2_strategy_backtest.png  — Strategy vs Buy & Hold backtest, drawdown, metrics table, annual returns
     fig3_hmm_internals.png      — Transition matrix A, emission means, VIX distributions, regime durations
     fig4_confidence_intervals.png — Bootstrap Sharpe & Return distributions, 20d regime confidence
-    fig5_model_selection.png    — BIC/AIC comparison (3/4/5-state)
+    fig5_model_selection.png    — BIC/AIC comparison (3/4-state)
     fig6_walk_forward.png       — OOS performance per fold (27 folds, 2019-2026)
     fig7_sector_rotation.png    — NSE sector rotation heatmap + returns
     fig8_new_macro_signals.png  — Yield curve, CPI, IIP, real rate, and regime phase space
