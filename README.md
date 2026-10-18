@@ -516,7 +516,7 @@ Total friction on portfolio rebalancing typically totals ~₹1,683 per ₹10,00,
 
 ## 6. Comprehensive Visualisation Suite (Figures 1–10)
 
-The pipeline automatically generates **10 publication-grade figures** saved to both `/output/` and the project root directory:
+The pipeline automatically generates **10 publication-grade figures** saved directly to the project root directory:
 
 | Figure | Filename | Key Panels & Visual Content | Quantitative Interpretation |
 |---|---|---|---|
@@ -625,6 +625,8 @@ uvicorn regime_api:app --host 0.0.0.0 --port 8000 --reload
 - `GET /current-regime`: Ingests latest market data and returns the active regime, posterior probabilities, and VIX.
 - `GET /regime/strategy`: Returns target asset allocations across all 8 sector ETFs and recommended cash reserves.
 - `GET /regime/history?n=30`: Returns the last $N$ days of regime classification history.
+- `GET /portfolio/reconcile`: Runs automated EOD trade audit (position breaks, cash conservation, NAV identity, stop integrity).
+- `GET /portfolio/ledger?limit=30`: Returns recent institutional portfolio accounting ledger entries from TimescaleDB.
 
 ---
 
@@ -648,6 +650,7 @@ python3 telegram_bot.py
 | `/start` | Welcome message & complete command reference |
 | `/status` | Current active regime, posteriors, equity/cash exposure, top sectors |
 | `/portfolio` | Live paper trading portfolio summary (NAV, return, holdings, charges, P&L) |
+| `/reconcile` | **EOD Trade Reconciliation Audit**: Runs position break, cash identity, and stop-loss integrity checks |
 | `/fig9` | Sends Fig 9 live paper trading dashboard image directly to chat |
 | `/update_portfolio` | Runs `paper_portfolio.py` to update live portfolio with latest EOD market data |
 | `/sectors` | Full sector allocation breakdown across all 4 regimes |
@@ -666,32 +669,63 @@ python3 telegram_bot.py
 
 ---
 
-## 9. Repository & File Inventory
+## 9. Repository & 5-Folder Architecture
+
+The codebase is organized into a clean 5-folder institutional architecture separating execution code, datasets, serialized model weights, visual dashboards, and test suites:
 
 ```
 Regime_detector_final/
-├── regime_detector_v2.py       # Core Pipeline: HMM Training, Sector Rotation, Visualizations, API Code
-├── paper_portfolio.py          # Live Paper Trading Execution Engine (Frozen Model, Whole Units, Indian Costs)
-├── regime_api.py               # Standalone FastAPI Production REST Microservice
-├── telegram_bot.py             # Interactive Telegram Bot Interface with Live Portfolio Commands
-├── paper_portfolio_history.csv # Daily OOS Portfolio State Log (NAV, Units, P&L, Regulatory Charges)
-├── regime_history_v2.csv       # 11-Year Daily Regime History Log (2015-2026, 2,591 sessions)
-├── walk_forward_summary.csv    # 8-Fold Out-of-Sample Walk-Forward Validation Metrics
-├── learned_sector_mix.json     # Dynamically Learned Optimal Sector Allocations (SLSQP Weights)
-├── hmm_model.pkl               # Serialized GaussianHMM Model Weights
-├── hmm_scaler.pkl              # Fitted QuantileTransformer Parameters (Normal distribution, 1000 quantiles)
-├── label_map.pkl               # State-to-Regime Anchoring Mapping
-├── output/                     # Comprehensive Output Directory (Figures & Mirrored Artifacts)
-│   ├── fig1_regime_detection.png
-│   ├── fig2_strategy_backtest.png
-│   ├── fig3_hmm_internals.png
-│   ├── fig4_confidence_intervals.png
-│   ├── fig5_model_selection.png
-│   ├── fig6_walk_forward.png
-│   ├── fig7_sector_rotation.png
-│   ├── fig8_new_macro_signals.png
-│   └── fig9_paper_portfolio.png
-└── README.md                   # Complete Institutional Documentation
+├── src/                                # Application Code, Execution Engines & Microservices
+│   ├── database/                       # PostgreSQL + TimescaleDB Models, Connection & Seeding Engine
+│   │   ├── connection.py               # Auto-detects TimescaleDB or graceful SQLite fallback
+│   │   ├── models.py                   # SQLAlchemy ORM Hypertables (Bars, Macro, FeatureStore, Orders, Ledger)
+│   │   ├── seed_data.py                # Historical Migration Script (11 Years Seeded to DB)
+│   │   ├── ingest_service.py           # Incremental Daily Delta Ingestion Service
+│   │   └── init_timescale.sql          # Native Hypertable Chunking & Compression Policies
+│   ├── reconciliation/                 # Institutional Order Management & EOD Audit Engine
+│   │   └── reconciler.py               # DailyReconciliationEngine (Position/Cash/NAV/Stop checks) & OMS
+│   ├── scripts/                        # Automated Daemons & Schedulers
+│   │   ├── eod_pipeline.py             # EOD ingestion, portfolio rebalancing & audit pipeline
+│   │   └── eod_scheduler.py            # Weekday 18:00 IST daemon & Docker cron runner
+│   ├── regime_detector_v2.py           # Core Pipeline: 4-State HMM Training & Backtest Engine
+│   ├── paper_portfolio.py              # Live Paper Trading Execution Engine (Frozen Model, Whole Units)
+│   ├── parameter_stability_test.py     # 2D Grid Parameter Robustness & Sharpe Plateau Heatmaps
+│   ├── regime_api.py                   # Standalone FastAPI Production REST Microservice
+│   └── telegram_bot.py                 # Interactive Telegram Bot Interface with Live Portfolio & Recon
+├── data/                               # Time-Series Datasets, Portfolio Ledgers & Audit Reports
+│   ├── regime_history_v2.csv           # 11-Year Daily Macro & Regime Posteriors (2015-2026, 2,750+ sessions)
+│   ├── paper_portfolio_history.csv     # Daily Out-of-Sample Portfolio State Log (NAV, Units, P&L)
+│   ├── sector_returns_cache.csv        # 8 NSE Sector ETF Daily Log Returns
+│   ├── walk_forward_summary.csv        # 27-Fold Out-of-Sample Walk-Forward Validation Metrics
+│   ├── parameter_stability_summary.csv # Quantitative Parameter Stability Grid Records
+│   └── parameter_stability_report.json # Machine-Readable Parameter Robustness Audit
+├── artifacts/                          # Serialized Model Artifacts & Production Weights
+│   ├── hmm_model.pkl                   # Trained GaussianHMM Model Weights (Frozen OOS Model)
+│   ├── hmm_scaler.pkl                  # Fitted QuantileTransformer Normalization Parameters
+│   ├── label_map.pkl                   # State-to-Regime Anchoring Mapping (Bull, Bear, HighVol, Sideways)
+│   ├── learned_sector_mix.json         # Constrained SLSQP Optimal Sector Allocations
+│   └── freeze_date.txt                 # Out-of-Sample Boundary Verification Stamp
+├── figures/                            # Publication-Grade Visual Dashboards (160 DPI)
+│   ├── fig1_regime_detection.png       # NIFTY price, regime shading, posteriors, VIX, equity curve
+│   ├── fig2_strategy_backtest.png      # Strategy vs Buy & Hold backtest, drawdown, metrics
+│   ├── fig3_hmm_internals.png          # Transition matrix A, emission means, regime durations
+│   ├── fig4_confidence_intervals.png   # Bootstrap Sharpe & Return distributions
+│   ├── fig5_model_selection.png        # BIC/AIC comparison (3/4-state)
+│   ├── fig6_walk_forward.png           # OOS performance across 27 folds (2019-2026)
+│   ├── fig7_sector_rotation.png        # NSE sector rotation heatmap + returns
+│   ├── fig8_new_macro_signals.png      # Yield curve, CPI, IIP, real rate & regime phase space
+│   ├── fig9_paper_portfolio.png        # Live paper trading portfolio tracking dashboard
+│   └── fig10_parameter_stability.png   # Multi-dimensional parameter stability heatmaps
+├── tests/                              # Institutional 231-Test Verification Suite
+│   ├── unit/                           # Smoothing, feature causality, execution, stops & reconciliation
+│   ├── integration/                    # Bit-identical walk-forward, REST API & frozen artifact contracts
+│   ├── conftest.py                     # Pytest fixtures & synthetic data generators
+│   └── helpers.py                      # Global test constants & verification assertions
+├── Dockerfile                          # Multi-stage production container definition
+├── docker-compose.yml                  # TimescaleDB + API + EOD Cron orchestration
+├── Makefile                            # Developer shortcuts (test, cov, lint, up, down, eod-now)
+├── pyproject.toml                      # Ruff, pytest & coverage configuration
+└── README.md                           # Complete Institutional Documentation
 ```
 
 ---
@@ -714,22 +748,28 @@ pip install -r requirements.txt
 ### 2. Run the Full Model Pipeline
 ```bash
 # Trains HMM, solves sector mix, runs walk-forward validation, generates Figs 1-8
-python3 regime_detector_v2.py
+python3 src/regime_detector_v2.py
 ```
 
 ### 3. Run the Live Paper Trading Simulator
 ```bash
 # Ingests latest EOD ETF prices, simulates live portfolio, updates Fig 9 & history CSV
-python3 paper_portfolio.py
+python3 src/paper_portfolio.py
 ```
 
-### 4. Launch Production Interfaces
+### 4. Run Parameter Stability Analysis
+```bash
+# Evaluates 2D parameter grid, generates Fig 10 & exports robustness audit
+python3 src/parameter_stability_test.py
+```
+
+### 5. Launch Production Interfaces
 ```bash
 # Start the FastAPI REST Microservice
-uvicorn regime_api:app --host 0.0.0.0 --port 8000
+uvicorn regime_api:app --host 0.0.0.0 --port 8000 --app-dir src
 
 # Start the Interactive Telegram Bot
-python3 telegram_bot.py
+python3 src/telegram_bot.py
 ```
 
 ### 5. Automated Tests, CI/CD & Containers
@@ -741,10 +781,12 @@ pytest -m "not slow"        # skip HMM-training / walk-forward tests
 make cov                    # with coverage report
 ruff check .                # lint
 
-# Containers
-docker compose up -d --build api                 # API on http://localhost:8000/docs
-docker compose --profile alerts up -d bot        # Telegram bot (needs .env)
-docker compose --profile test run --rm tests     # run the suite in a clean container
+# Containers & EOD Automation
+docker compose up -d --build api cron         # API (port 8000) + EOD Scheduler (18:00 IST)
+docker compose --profile alerts up -d bot     # Telegram bot (needs .env)
+docker compose --profile test run --rm tests  # run the suite in a clean container
+make eod-now                                  # trigger immediate EOD pipeline execution
+make cron-logs                                # stream real-time EOD scheduler logs
 ```
 
 | Test area | What it proves |

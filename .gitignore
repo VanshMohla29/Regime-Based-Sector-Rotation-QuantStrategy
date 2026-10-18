@@ -47,3 +47,8 @@ sector_returns_cache.csv
 coverage.xml
 htmlcov/
 
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+

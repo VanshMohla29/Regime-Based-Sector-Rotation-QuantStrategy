@@ -1,6 +1,5 @@
 """Tests for feature engineering + the HMM feature contract shared with the API / paper portfolio."""
 
-import numpy as np
 import pandas as pd
 import pytest
 
@@ -73,4 +72,4 @@ def test_hmm_feature_set_is_the_documented_eleven(feat):
 
 def test_paper_portfolio_feature_cols_match_training_features(feat):
     """Train/serve skew guard: a reordered column silently feeds the wrong data to the HMM."""
-    assert pp.FEATURE_COLS == list(r2.select_features_for_hmm(feat).columns)
+    assert list(r2.select_features_for_hmm(feat).columns) == pp.FEATURE_COLS

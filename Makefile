@@ -14,7 +14,7 @@ lint:
 	ruff check .
 
 cov:
-	python -m pytest --cov=regime_detector_v2 --cov=paper_portfolio --cov=regime_api --cov-report=term-missing
+	python -m pytest --cov=src --cov-report=term-missing
 
 docker-build:
 	docker build --target runtime -t regime-detector:latest .
@@ -23,7 +23,13 @@ docker-test:     ## run the suite inside a clean container
 	docker compose --profile test run --rm --build tests
 
 up:
-	docker compose up -d --build api
+	docker compose up -d --build api cron
 
 down:
 	docker compose down
+
+eod-now:         ## trigger immediate EOD pipeline run
+	docker compose exec -T api python src/scripts/eod_pipeline.py
+
+cron-logs:       ## stream EOD scheduler logs
+	docker compose logs -f cron

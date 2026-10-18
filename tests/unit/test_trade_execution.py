@@ -70,7 +70,7 @@ def test_buy_never_overdraws_cash(seed):
     rng = np.random.default_rng(seed)
     prices = {e: float(rng.uniform(5, 800)) for e in ETFS}
     w = rng.random(3)
-    weights = dict(zip(ETFS, w / w.sum()))
+    weights = dict(zip(ETFS, w / w.sum(), strict=True))
     cash = float(rng.uniform(10_000, 5_000_000))
 
     _, _, new_cash, charges = pp._execute_buy(cash, weights, ETFS, prices)

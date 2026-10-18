@@ -155,4 +155,52 @@ def test_current_regime_reads_latest_history_row(client):
 def test_openapi_schema_is_served(client):
     paths = client.get('/openapi.json').json()['paths']
 
-    assert {'/health', '/regime/predict', '/regime/strategy', '/regime/current'} <= set(paths)
+    assert {'/health', '/regime/predict', '/regime/strategy', '/regime/current', '/portfolio/reconcile', '/portfolio/ledger', '/macro/ingest', '/market/ingest', '/macro/sync'} <= set(paths)
+
+
+def test_portfolio_reconcile_endpoint(client):
+    r = client.get('/portfolio/reconcile')
+    assert r.status_code == 200
+    body = r.json()
+    assert 'status' in body
+    assert body['status'] in ('RECONCILED', 'BREAK_DETECTED')
+    assert 'position_breaks' in body
+    assert 'stop_loss_integrity' in body
+
+
+def test_portfolio_ledger_endpoint(client):
+    r = client.get('/portfolio/ledger', params={'limit': 5})
+    assert r.status_code == 200
+    body = r.json()
+    assert isinstance(body, list)
+    if len(body) > 0:
+        assert 'nav' in body[0]
+        assert 'cash' in body[0]
+        assert 'regime' in body[0]
+
+
+def test_macro_ingest_endpoint(client):
+    payload = {
+        "effective_date": "2026-10-12",
+        "cpi_yoy": 5.4,
+        "cpi_mom": 0.2,
+        "iip_yoy": 4.5,
+        "wpi_yoy": 2.1,
+        "repo_rate": 6.5,
+        "gsec_10y": 7.05,
+        "gsec_2y": 5.25,
+        "forward_fill": True
+    }
+    r = client.post('/macro/ingest', json=payload)
+    assert r.status_code == 200
+    body = r.json()
+    assert body['status'] == 'SUCCESS'
+    assert body['effective_date'] == "2026-10-12"
+
+
+def test_macro_sync_endpoint(client):
+    r = client.post('/macro/sync')
+    assert r.status_code == 200
+    body = r.json()
+    assert 'status' in body
+

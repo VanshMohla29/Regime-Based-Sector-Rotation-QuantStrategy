@@ -1,7 +1,7 @@
 [tool.pytest.ini_options]
 minversion = "8.0"
 testpaths = ["tests"]
-pythonpath = ["."]
+pythonpath = ["src", "."]
 addopts = "-ra --strict-markers --strict-config"
 markers = [
     "slow: trains HMMs / runs multi-fold walk-forward (deselect with -m 'not slow')",
@@ -14,7 +14,7 @@ filterwarnings = [
 ]
 
 [tool.coverage.run]
-source = ["."]
+source = ["src"]
 branch = true
 omit = [
     "tests/*",
@@ -35,10 +35,7 @@ exclude_lines = [
 line-length = 140
 target-version = "py313"
 extend-exclude = [
-    "regime_detector_v2_backup.py",
-    "paper_portfolio_backup.py",
     "scratch",
-    "output",
 ]
 
 [tool.ruff.lint]

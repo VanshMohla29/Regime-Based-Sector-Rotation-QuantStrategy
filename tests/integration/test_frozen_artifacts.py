@@ -23,7 +23,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 
 
 def _path(name):
-    return os.path.join(ROOT, name)
+    for sub in ['artifacts', 'data', 'figures', 'src', '']:
+        p = os.path.join(ROOT, sub, name) if sub else os.path.join(ROOT, name)
+        if os.path.exists(p):
+            return p
+    return os.path.join(ROOT, 'artifacts', name)
 
 
 @pytest.fixture(scope="module")

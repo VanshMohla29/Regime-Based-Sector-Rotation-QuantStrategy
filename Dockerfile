@@ -54,13 +54,15 @@ RUN groupadd --system app && useradd --system --gid app --create-home app
 COPY --from=builder /opt/venv /opt/venv
 
 WORKDIR /app
-# Code
-COPY regime_api.py regime_detector_v2.py paper_portfolio.py telegram_bot.py ./
-# Frozen model artifacts served by the API / used by the paper portfolio
-COPY hmm_model.pkl hmm_scaler.pkl label_map.pkl learned_sector_mix.json \
-     regime_history_v2.csv freeze_date.txt ./
+ENV PYTHONPATH="/app/src:$PYTHONPATH"
 
-RUN mkdir -p /app/output && chown -R app:app /app
+# Application code, data, artifacts, and figures
+COPY src/ ./src/
+COPY data/ ./data/
+COPY artifacts/ ./artifacts/
+COPY figures/ ./figures/
+
+RUN chown -R app:app /app
 USER app
 
 EXPOSE 8000
@@ -68,4 +70,4 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4).status == 200 else 1)"
 
-CMD ["uvicorn", "regime_api:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "regime_api:app", "--host", "0.0.0.0", "--port", "8000", "--app-dir", "src"]

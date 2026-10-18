@@ -1,15 +1,45 @@
 services:
-  # REST API serving the frozen HMM model  ->  http://localhost:8000/docs
+  # TimescaleDB (PostgreSQL 16 + TimescaleDB Extension)
+  db:
+    image: timescale/timescaledb:latest-pg16
+    container_name: regime_timescaledb
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: regime_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+    ports:
+      - "5432:5432"
+    volumes:
+      - timescale_data:/var/lib/postgresql/data
+      - ./src/database/init_timescale.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d regime_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # REST API serving the frozen HMM model -> http://localhost:8000/docs
   api:
     build:
       context: .
       target: runtime
     image: regime-detector:latest
+    depends_on:
+      db:
+        condition: service_healthy
     ports:
       - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+psycopg2://postgres:postgrespassword@db:5432/regime_db
     env_file:
       - path: .env
         required: false
+    volumes:
+      - ./data:/app/data
+      - ./artifacts:/app/artifacts
+      - ./figures:/app/figures
+      - ./src:/app/src
     restart: unless-stopped
 
   # Telegram alert bot (needs TELEGRAM_BOT_TOKEN in .env)
@@ -18,12 +48,48 @@ services:
     image: regime-detector:latest
     depends_on:
       - api
-    command: ["python", "telegram_bot.py"]
+      - db
+    command: ["python", "src/telegram_bot.py"]
+    volumes:
+      - ./data:/app/data
+      - ./artifacts:/app/artifacts
+      - ./figures:/app/figures
+      - ./src:/app/src
+    environment:
+      - DATABASE_URL=postgresql+psycopg2://postgres:postgrespassword@db:5432/regime_db
     env_file:
       - path: .env
         required: false
     restart: unless-stopped
+    healthcheck:
+      disable: true
     profiles: ["alerts"]
+
+  # Automated EOD Ingestion, Rotation & Reconciliation Scheduler (18:00 IST)
+  cron:
+    image: regime-detector:latest
+    container_name: regime_cron
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      api:
+        condition: service_started
+    command: ["python", "src/scripts/eod_scheduler.py"]
+    volumes:
+      - ./data:/app/data
+      - ./artifacts:/app/artifacts
+      - ./figures:/app/figures
+      - ./src:/app/src
+    environment:
+      - DATABASE_URL=postgresql+psycopg2://postgres:postgrespassword@db:5432/regime_db
+      - TZ=Asia/Kolkata
+      - EOD_SCHEDULE_TIME=18:00
+    env_file:
+      - path: .env
+        required: false
+    healthcheck:
+      disable: true
 
   # Run the full test-suite in a clean container
   #   docker compose --profile test run --rm tests
@@ -32,3 +98,6 @@ services:
       context: .
       target: test
     profiles: ["test"]
+
+volumes:
+  timescale_data:
