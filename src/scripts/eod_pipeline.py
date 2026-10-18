@@ -65,14 +65,29 @@ def sync_latest_portfolio_to_db():
                 daily_pnl=float(latest_row.get('Unrealized_Gains', 0.0)),
                 daily_return_pct=float(latest_row.get('Daily_Return', 0.0)),
                 in_cash=bool(latest_row.get('In_Cash', False)),
-                stop_triggered=False,
+                stop_triggered="STOP" in str(latest_row['Regime']),
                 days_in_cash=0,
                 active_regime=str(latest_row['Regime']),
                 cumulative_friction=float(latest_row.get('Total_Charges', 0.0)),
             )
             db.add(ledger_entry)
+        else:
+            existing_ledger.nav = nav
+            existing_ledger.cash_balance = float(latest_row['Cash'])
+            existing_ledger.equity_value = float(latest_row['Equity'])
+            existing_ledger.peak_nav = float(df['NAV'].max())
+            existing_ledger.drawdown_pct = float(latest_row['Drawdown'])
+            existing_ledger.daily_pnl = float(latest_row.get('Unrealized_Gains', 0.0))
+            existing_ledger.daily_return_pct = float(latest_row.get('Daily_Return', 0.0))
+            existing_ledger.in_cash = bool(latest_row.get('In_Cash', False))
+            existing_ledger.stop_triggered = "STOP" in str(latest_row['Regime'])
+            existing_ledger.active_regime = str(latest_row['Regime'])
+            existing_ledger.cumulative_friction = float(latest_row.get('Total_Charges', 0.0))
 
-        # Upsert active ETF positions
+        # Clear existing positions for this session date before inserting current positions
+        db.query(Position).filter(Position.time == ts).delete()
+
+        # Insert active ETF positions
         for sec in sector_names:
             units = int(latest_row.get(f"{sec}_units", 0))
             if units > 0:
@@ -82,21 +97,19 @@ def sync_latest_portfolio_to_db():
                 unrealized = float(latest_row.get(f"{sec}_pnl", 0.0))
                 weight = (mkt_val / nav) if nav > 0 else 0.0
 
-                existing_pos = db.query(Position).filter(Position.time == ts, Position.symbol == sec).first()
-                if not existing_pos:
-                    db.add(
-                        Position(
-                            time=ts,
-                            symbol=sec,
-                            units=units,
-                            average_cost=avg_cost,
-                            market_price=mkt_price,
-                            invested_value=units * avg_cost,
-                            market_value=mkt_val,
-                            unrealized_pnl=unrealized,
-                            weight_pct=weight,
-                        )
+                db.add(
+                    Position(
+                        time=ts,
+                        symbol=sec,
+                        units=units,
+                        average_cost=avg_cost,
+                        market_price=mkt_price,
+                        invested_value=units * avg_cost,
+                        market_value=mkt_val,
+                        unrealized_pnl=unrealized,
+                        weight_pct=weight,
                     )
+                )
     return ts
 
 

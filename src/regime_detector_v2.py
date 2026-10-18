@@ -2703,7 +2703,7 @@ def main():
     # ── 13. Save regime history CSV ───────────────────────────────────
     out_cols = ['NIFTY','Returns','VIX','RepoRate','GSecYield10','YieldCurve','CPI','IIP','WPI',
                 'Regime','Bull','Bear','HighVol','Sideways']
-    result[out_cols].to_csv(f'{DATA_DIR}/regime_history_v2.csv')
+    result[out_cols].to_csv(f'{DATA_DIR}/regime_history_v2.csv', index_label='Date')
     print(f"\n✓ Regime history CSV saved to {DATA_DIR}")
 
     # ── 14. Save walk-forward summary ────────────────────────────────

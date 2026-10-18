@@ -250,10 +250,41 @@ class DailyReconciliationEngine:
 
         # 6. Check 4: Stop-Loss Integrity
         stop_integrity = "PASS"
-        if ledger.drawdown_pct <= -0.06:
-            # Must be in 100% cash with 0 equity exposure
-            total_shares = sum(p.units for p in positions)
+        total_shares = sum(p.units for p in positions)
+
+        if "STOP" in str(ledger.active_regime) or ledger.stop_triggered:
+            # Active stop-loss state: must be in 100% cash with 0 equity exposure
             if not ledger.in_cash or total_shares > 0 or ledger.equity_value > 0.01:
+                stop_integrity = "VIOLATION"
+        elif not ledger.in_cash:
+            # When holding equity, evaluate trailing drawdown from the current cycle peak
+            last_cash_ledger = (
+                db.query(PortfolioLedger)
+                .filter(PortfolioLedger.time < ledger.time, PortfolioLedger.in_cash == True)
+                .order_by(PortfolioLedger.time.desc())
+                .first()
+            )
+            if last_cash_ledger:
+                cycle_peak = (
+                    db.query(func.max(PortfolioLedger.nav))
+                    .filter(
+                        PortfolioLedger.time > last_cash_ledger.time,
+                        PortfolioLedger.time <= ledger.time,
+                    )
+                    .scalar()
+                ) or ledger.nav
+            else:
+                historical_max = (
+                    db.query(func.max(PortfolioLedger.nav))
+                    .filter(PortfolioLedger.time <= ledger.time)
+                    .scalar()
+                )
+                cycle_peak = max(historical_max or 0.0, ledger.peak_nav or 0.0, ledger.nav)
+
+            cycle_dd = (ledger.nav - cycle_peak) / cycle_peak if cycle_peak > 0 else 0.0
+            effective_dd = min(cycle_dd, ledger.drawdown_pct) if not last_cash_ledger else cycle_dd
+
+            if effective_dd <= -0.06:
                 stop_integrity = "VIOLATION"
 
         # Overall Reconciliation Status

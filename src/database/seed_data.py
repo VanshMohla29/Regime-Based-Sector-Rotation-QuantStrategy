@@ -49,7 +49,8 @@ def seed_database():
         reg_csv = os.path.join(ROOT_DIR, "regime_history_v2.csv")
     if os.path.exists(reg_csv):
         df_reg = pd.read_csv(reg_csv)
-        df_reg['Date'] = pd.to_datetime(df_reg['Date'])
+        date_col = 'Date' if 'Date' in df_reg.columns else ('time' if 'time' in df_reg.columns else df_reg.columns[0])
+        df_reg['Date'] = pd.to_datetime(df_reg[date_col])
         print(f"✓ Found regime_history_v2.csv with {len(df_reg)} records.")
 
         with get_db() as db:
@@ -149,14 +150,19 @@ def seed_database():
 
         with get_db() as db:
             existing_ledger = db.query(PortfolioLedger).count()
-            if existing_ledger == 0:
+            if existing_ledger < len(df_paper):
+                if existing_ledger > 0:
+                    db.query(PortfolioLedger).delete()
+                    db.query(Position).delete()
                 print(f"  Seeding portfolio_ledger and daily positions from {len(df_paper)} paper trading sessions...")
                 ledger_objects = []
                 pos_objects = []
 
+                running_peak = 0.0
                 for _, row in df_paper.iterrows():
                     ts = row['Date'].to_pydatetime()
                     nav = float(row['NAV'])
+                    running_peak = max(running_peak, nav)
 
                     ledger_objects.append(
                         PortfolioLedger(
@@ -164,12 +170,12 @@ def seed_database():
                             nav=nav,
                             cash_balance=float(row['Cash']),
                             equity_value=float(row['Equity']),
-                            peak_nav=nav,  # approximate initial peak
+                            peak_nav=running_peak,
                             drawdown_pct=float(row['Drawdown']),
                             daily_pnl=float(row.get('Unrealized_Gains', 0.0)),
                             daily_return_pct=float(row.get('Daily_Return', 0.0)),
                             in_cash=bool(row.get('In_Cash', False)),
-                            stop_triggered=False,
+                            stop_triggered="STOP" in str(row['Regime']),
                             days_in_cash=0,
                             active_regime=str(row['Regime']),
                             cumulative_friction=float(row.get('Total_Charges', 0.0)),
