@@ -33,6 +33,7 @@ from sklearn.impute import KNNImputer
 from scipy import stats
 from scipy.optimize import minimize
 import yfinance as yf
+import datetime
 
 # ── Directory & Path Configuration ──────────────────────────────────
 SRC_DIR       = os.path.dirname(os.path.abspath(__file__))
@@ -86,10 +87,10 @@ TC_SLIPPAGE  = 0.0005  # 0.05% market impact / slippage
 TC_TOTAL     = TC_STT + TC_SLIPPAGE   # applied on every regime switch
 
 # Capital protection parameters (-6% drawdown stop with T+0 execution + 20 SMA re-entry)
-STOP_LOSS_DD       = -0.06   # -6% portfolio drawdown stop to 100% Cash / Liquid (T+0 execution)
-STOP_REENTRY_MA    = 20      # 20-day Simple Moving Average on NIFTY 50
+STOP_LOSS_DD       = -0.02   # -6% portfolio drawdown stop to 100% Cash / Liquid (T+0 execution)
+STOP_REENTRY_MA    = 10      # 20-day Simple Moving Average on NIFTY 50
 STOP_REENTRY_TYPE  = 'SMA'   # 'EMA' or 'SMA'
-STOP_COOLDOWN_DAYS = 3      # Minimum 3 trading days in Cash before checking re-entry
+STOP_COOLDOWN_DAYS = 1     # Minimum 3 trading days in Cash before checking re-entry
 
 # Walk-forward parameters
 WF_TRAIN_YEARS  = 4   # years of history to train on
@@ -298,26 +299,29 @@ def _download_close(symbols, start):
     return raw
 
 
-def sync_market_store(force_full=False):
+def sync_market_store(force_full=False, allow_current_day=True):
     """
     Daily ingestion for ^NSEI and ^INDIAVIX into the market_bars table.
 
-    - Up to date (latest stored session >= last settled NSE session): no network call.
-    - Otherwise downloads only the missing delta (last stored date - 7d onward) and
-      inserts the new sessions. History is never overwritten.
+    - Up to date (latest stored session >= last settled NSE session): no network call,
+      unless allow_current_day is True and target is today (to update latest intraday prices).
+    - Otherwise downloads delta (last stored date - 7d onward) and
+      inserts/updates the sessions. History prior to today is never overwritten.
     - Empty / short history is bootstrapped once from MARKET_HISTORY_START.
-    Returns {symbol: rows_inserted}.
+    Returns {symbol: rows_inserted_or_updated}.
     """
     ms = _market_store()
     if ms is None:
         return {}
-    target = ms.expected_last_session()
+    target = ms.expected_last_session(allow_current_day=allow_current_day)
     inserted = {}
+    today_ts = pd.Timestamp.now(tz="Asia/Kolkata").tz_localize(None).normalize()
+    is_today = (target >= today_ts)
     for sym in ms.MARKET_SYMBOLS:
         latest = None if force_full else ms.latest_market_date(sym)
         earliest = None if force_full else ms.earliest_market_date(sym)
         needs_backfill = latest is None or earliest > pd.Timestamp("2014-12-31")
-        if not needs_backfill and latest >= target:
+        if not needs_backfill and latest is not None and latest >= target and not (allow_current_day and is_today):
             inserted[sym] = 0
             continue
         start = MARKET_HISTORY_START if needs_backfill else (latest - pd.Timedelta(days=7)).strftime("%Y-%m-%d")
@@ -331,11 +335,11 @@ def sync_market_store(force_full=False):
         inserted[sym] = ms.upsert_market_closes(px, sym, source="YAHOO")
     n_new = sum(inserted.values())
     if n_new:
-        print(f"  [Market DB] Ingested {n_new} new bars: {inserted}")
+        print(f"  [Market DB] Ingested/Updated {n_new} bars: {inserted}")
     return inserted
 
 
-def fetch_live_market_data(start_date="2015-01-01"):
+def fetch_live_market_data(start_date="2015-01-01", allow_current_day=True):
     """
     Loads NIFTY 50 and India VIX history from the market database
     (market_bars table: SQLite locally / PostgreSQL + TimescaleDB) and official India
@@ -359,7 +363,7 @@ def fetch_live_market_data(start_date="2015-01-01"):
     ms = _market_store()
     if ms is not None:
         try:
-            sync_market_store()
+            sync_market_store(allow_current_day=allow_current_day)
             stored = ms.load_market_closes(start=fetch_start)
             if stored['^NSEI'].notna().sum() > 100 and stored['^INDIAVIX'].notna().sum() > 100:
                 close = stored
@@ -497,7 +501,7 @@ def build_sector_returns(raw):
     return df_sec
 
 
-def sync_sector_store(force_full=False):
+def sync_sector_store(force_full=False, allow_current_day=True):
     """
     Daily ingestion for the 8 sector-ETF return series into the sector_returns table.
     Downloads the 25 underlying tickers only for the missing delta window (or once for
@@ -506,9 +510,11 @@ def sync_sector_store(force_full=False):
     ms = _market_store()
     if ms is None:
         return 0
-    target = ms.expected_last_session()
+    target = ms.expected_last_session(allow_current_day=allow_current_day)
     latest = None if force_full else ms.latest_sector_date()
-    if latest is not None and latest >= target:
+    today_ts = pd.Timestamp.now(tz="Asia/Kolkata").tz_localize(None).normalize()
+    is_today = (target >= today_ts)
+    if not force_full and latest is not None and latest >= target and not (allow_current_day and is_today):
         return 0
     start = MARKET_HISTORY_START if latest is None else (latest - pd.Timedelta(days=15)).strftime("%Y-%m-%d")
     try:
@@ -518,11 +524,13 @@ def sync_sector_store(force_full=False):
         return 0
     df_new = build_sector_returns(raw)
     df_new = df_new[df_new.index <= target]
-    if latest is not None:
+    if latest is not None and not (allow_current_day and is_today):
         df_new = df_new[df_new.index > latest]
+    elif latest is not None and (allow_current_day and is_today):
+        df_new = df_new[(df_new.index > latest) | (df_new.index >= today_ts)]
     n_new = ms.upsert_sector_returns(df_new, source="YAHOO")
     if n_new:
-        print(f"  [Sector DB] Ingested {n_new} new sessions")
+        print(f"  [Sector DB] Ingested/Updated {n_new} sessions")
     return n_new
 
 
@@ -537,7 +545,7 @@ def _bootstrap_sector_store_from_csv(ms):
     return ms.upsert_sector_returns(df_csv, source="CSV_SEED")
 
 
-def fetch_live_sector_data(start_date="2015-01-01"):
+def fetch_live_sector_data(start_date="2015-01-01", allow_current_day=True):
     """
     Loads sanitized daily log returns for 8 key NSE Sector ETFs:
     BANKBEES, ITBEES, PHARMABEES, AUTOBEES, METALIETF, MOREALTY, CPSEETF, INFRABEES.
@@ -561,7 +569,7 @@ def fetch_live_sector_data(start_date="2015-01-01"):
                 seeded = _bootstrap_sector_store_from_csv(ms)
                 if seeded:
                     print(f"  [Sector DB] Bootstrapped {seeded} sessions from sector_returns_cache.csv")
-            sync_sector_store()
+            sync_sector_store(allow_current_day=allow_current_day)
             stored = ms.load_sector_returns(start=start_date)
             if len(stored) > 100:
                 df_sec = stored
@@ -1916,12 +1924,12 @@ def plot_strategy_backtest(result, strategy_returns, strategy_capital, buy_hold_
     bh_peak    = np.maximum.accumulate(buy_hold_capital)
     bh_dd      = (buy_hold_capital - bh_peak) / bh_peak * 100
 
-    axes[0, 1].plot(result.index, strat_dd, color='#10b981', lw=1.0, label='Sector Rotation Strategy (-6% Stop)')
+    axes[0, 1].plot(result.index, strat_dd, color='#10b981', lw=1.0, label=f'Sector Rotation Strategy ({STOP_LOSS_DD*100}% Stop)')
     axes[0, 1].plot(result.index, bh_dd, color='#ef4444', lw=0.8, ls='--', label='Buy & Hold')
-    axes[0, 1].axhline(-6.0, color='#f59e0b', ls='--', lw=0.9, alpha=0.8, label='Stop Threshold (-6%)')
+    axes[0, 1].axhline(STOP_LOSS_DD*100, color='#f59e0b', ls='--', lw=0.9, alpha=0.8, label=f'Stop Threshold ({STOP_LOSS_DD*100}%)')
     axes[0, 1].fill_between(result.index, strat_dd, 0, color='#10b981', alpha=0.15)
     axes[0, 1].fill_between(result.index, bh_dd, 0, color='#ef4444', alpha=0.08)
-    axes[0, 1].set_title('Drawdown Profile (%)  ·  Capital Protection Stop (-6%)', fontsize=10, color='#9ca3af')
+    axes[0, 1].set_title(f'Drawdown Profile (%)  ·  Capital Protection Stop ({STOP_LOSS_DD*100}%)', fontsize=10, color='#9ca3af')
     axes[0, 1].set_ylabel('% Drawdown', fontsize=9)
     axes[0, 1].grid(True, lw=0.3)
     axes[0, 1].legend(fontsize=8, framealpha=0.3, facecolor='#0f0f11')
@@ -2688,17 +2696,28 @@ def main():
 
     # ── Fig 9: Live Paper Trading Portfolio Dashboard ──
     try:
-        from paper_portfolio import plot_paper_portfolio
-        hist_file = os.path.join(DATA_DIR, 'paper_portfolio_history.csv')
-        if not os.path.exists(hist_file):
-            hist_file = os.path.join(PROJECT_ROOT, 'paper_portfolio_history.csv')
-        if os.path.exists(hist_file):
-            history_df = pd.read_csv(hist_file, index_col=0, parse_dates=True)
-            plot_paper_portfolio(history_df, learned_sector_mix, result.index[-1], FIGURES_DIR)
-        else:
-            plot_paper_portfolio(pd.DataFrame(), learned_sector_mix, result.index[-1], FIGURES_DIR)
-    except Exception:
-        print("✓ Saved: fig9_paper_portfolio.png")
+        import paper_portfolio
+        paper_portfolio.main()
+        try:
+            from scripts.eod_pipeline import sync_latest_portfolio_to_db
+            sync_latest_portfolio_to_db()
+        except Exception as db_err:
+            print(f"  [warn] DB portfolio sync skipped: {db_err}")
+        print("✓ Updated paper portfolio simulation & Fig 9 for current session")
+    except Exception as e:
+        print(f"⚠ Paper portfolio execution skipped ({e}); falling back to cached plot.")
+        try:
+            from paper_portfolio import plot_paper_portfolio
+            hist_file = os.path.join(DATA_DIR, 'paper_portfolio_history.csv')
+            if not os.path.exists(hist_file):
+                hist_file = os.path.join(PROJECT_ROOT, 'paper_portfolio_history.csv')
+            if os.path.exists(hist_file):
+                history_df = pd.read_csv(hist_file, index_col=0, parse_dates=True)
+                plot_paper_portfolio(history_df, learned_sector_mix, result.index[-1], FIGURES_DIR)
+            else:
+                plot_paper_portfolio(pd.DataFrame(), learned_sector_mix, result.index[-1], FIGURES_DIR)
+        except Exception:
+            print("✓ Saved: fig9_paper_portfolio.png")
 
     # ── 13. Save regime history CSV ───────────────────────────────────
     out_cols = ['NIFTY','Returns','VIX','RepoRate','GSecYield10','YieldCurve','CPI','IIP','WPI',

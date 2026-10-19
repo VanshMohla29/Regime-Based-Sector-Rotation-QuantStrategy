@@ -155,7 +155,7 @@ def run_eod_pipeline():
     print("\n[Step 1/4] Automated Macro Sync & Daily Market Bar Ingestion...")
     try:
         auto_sync_macro_from_sources()
-        ingest_res = ingest_daily_update()
+        ingest_res = ingest_daily_update(is_eod=True)
         print(f"✓ Data Ingestion Status: {ingest_res.get('status')}")
     except Exception as e:
         print(f"  [warn] Ingestion warning: {e}")

@@ -5,6 +5,7 @@ import pandas as pd
 import pytest
 
 import regime_detector_v2 as r2
+import paper_portfolio as pp
 
 REPO = 0.065 / 252
 
@@ -66,8 +67,8 @@ def test_peak_resets_on_reentry():
 def test_walk_forward_signature_exposes_stop_params():
     import inspect
     sig = inspect.signature(r2.walk_forward_validation)
-    assert sig.parameters['stop_dd'].default == r2.STOP_LOSS_DD == -0.06
-    assert sig.parameters['cooldown_days'].default == r2.STOP_COOLDOWN_DAYS
+    assert sig.parameters['stop_dd'].default == r2.STOP_LOSS_DD == pp.STOP_LOSS_DD
+    assert sig.parameters['cooldown_days'].default == r2.STOP_COOLDOWN_DAYS == pp.STOP_COOLDOWN_DAYS
 
 
 def test_model_selection_removed():

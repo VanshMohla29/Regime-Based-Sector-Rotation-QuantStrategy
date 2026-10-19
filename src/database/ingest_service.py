@@ -42,23 +42,24 @@ def get_latest_feature_date() -> datetime:
     return get_latest_stored_date("^NSEI")
 
 
-def ingest_daily_update(force_reload: bool = False):
+def ingest_daily_update(force_reload: bool = False, is_eod: bool = False):
     """
     Checks the latest date in the database and ingests new trading days.
-    If already up-to-date, completes in milliseconds.
+    If already up-to-date and not an EOD settlement run, completes in milliseconds.
+    If is_eod=True, ensures final market close settlement data is ingested and updated.
     """
     # Append only the missing sessions of NIFTY / India VIX bars and the 8 sector-ETF
     # return series. No-op (no network) when the stored history is already current.
-    market_new = r2.sync_market_store(force_full=force_reload)
-    sector_new = r2.sync_sector_store(force_full=force_reload)
+    market_new = r2.sync_market_store(force_full=force_reload, allow_current_day=True)
+    sector_new = r2.sync_sector_store(force_full=force_reload, allow_current_day=True)
 
     latest_dt = get_latest_feature_date()
     if latest_dt.tzinfo is not None:
         latest_dt = latest_dt.replace(tzinfo=None)
     today = datetime.now()
     
-    # If latest stored date is within the last 20 hours (e.g. today's close already stored), return early
-    if not force_reload and (today - latest_dt) < timedelta(hours=20):
+    # If latest stored date is within the last 20 hours and not an EOD settlement run, return early
+    if not force_reload and not is_eod and (today - latest_dt) < timedelta(hours=20):
         print(f"✓ Database is already up to date (Latest record: {latest_dt.strftime('%Y-%m-%d')}).")
         return {"status": "UP_TO_DATE", "latest_date": latest_dt.isoformat(),
                 "market_bars_ingested": market_new, "sector_rows_ingested": sector_new}
@@ -67,7 +68,7 @@ def ingest_daily_update(force_reload: bool = False):
     print(f"Ingesting latest market & macro delta (fetch window: {start_date} to today)...")
 
     # Fetch recent market data
-    df = r2.fetch_live_market_data(start_date=start_date)
+    df = r2.fetch_live_market_data(start_date=start_date, allow_current_day=True)
     if df is None or len(df) == 0:
         return {"status": "NO_NEW_DATA"}
 
@@ -81,7 +82,9 @@ def ingest_daily_update(force_reload: bool = False):
             ts = idx.to_pydatetime()
             if ts.tzinfo is not None:
                 ts = ts.replace(tzinfo=None)
-            if ts <= latest_dt and not force_reload:
+            if ts < latest_dt and not force_reload:
+                continue
+            if ts == latest_dt and not (force_reload or is_eod):
                 continue
 
             # 1. Upsert into FeatureStore
@@ -103,6 +106,18 @@ def ingest_daily_update(force_reload: bool = False):
                         real_rate_mom=float(row['real_rate_mom']),
                     )
                 )
+            else:
+                existing_f.ret_5d_pct = float(row['ret_5d_pct'])
+                existing_f.vol_60d = float(row['vol_60d'])
+                existing_f.price_vs_ma200 = float(row['price_vs_ma200'])
+                existing_f.drawdown = float(row['drawdown'])
+                existing_f.drawdown_diff20d = float(row['drawdown_diff20d'])
+                existing_f.vix_vs_ma20 = float(row['vix_vs_ma20'])
+                existing_f.yield_curve = float(row['yield_curve'])
+                existing_f.cpi_yoy = float(row['cpi_yoy'])
+                existing_f.iip_yoy = float(row['iip_yoy'])
+                existing_f.wpi_mom_vs_ma3m = float(row['wpi_mom_vs_ma3m'])
+                existing_f.real_rate_mom = float(row['real_rate_mom'])
 
             # 2. Upsert into MarketBar
             if idx in df.index:
@@ -122,6 +137,12 @@ def ingest_daily_update(force_reload: bool = False):
                             source="YAHOO_LIVE",
                         )
                     )
+                else:
+                    existing_b.close = close_px
+                    existing_b.high = max(existing_b.high or close_px, close_px)
+                    existing_b.low = min(existing_b.low or close_px, close_px)
+                    existing_b.returns = ret_val
+                    existing_b.source = "YAHOO_LIVE"
 
             # 3. Upsert into MacroIndicator
             if idx in df.index:
@@ -141,6 +162,16 @@ def ingest_daily_update(force_reload: bool = False):
                             yield_curve=float(df.loc[idx, 'YieldCurve']) if not pd.isna(df.loc[idx, 'YieldCurve']) else None,
                         )
                     )
+                else:
+                    if not pd.isna(df.loc[idx, 'CPI']): existing_m.cpi_yoy = float(df.loc[idx, 'CPI'])
+                    if 'CPI_MoM' in df.columns and not pd.isna(df.loc[idx, 'CPI_MoM']): existing_m.cpi_mom = float(df.loc[idx, 'CPI_MoM'])
+                    if not pd.isna(df.loc[idx, 'WPI']): existing_m.wpi_yoy = float(df.loc[idx, 'WPI'])
+                    if 'WPI_MoM' in df.columns and not pd.isna(df.loc[idx, 'WPI_MoM']): existing_m.wpi_mom = float(df.loc[idx, 'WPI_MoM'])
+                    if not pd.isna(df.loc[idx, 'IIP']): existing_m.iip_yoy = float(df.loc[idx, 'IIP'])
+                    if not pd.isna(df.loc[idx, 'RepoRate']): existing_m.repo_rate = float(df.loc[idx, 'RepoRate'])
+                    if not pd.isna(df.loc[idx, 'GSecYield10']): existing_m.gsec_10y = float(df.loc[idx, 'GSecYield10'])
+                    if not pd.isna(df.loc[idx, 'GSecYield2']): existing_m.gsec_2y = float(df.loc[idx, 'GSecYield2'])
+                    if not pd.isna(df.loc[idx, 'YieldCurve']): existing_m.yield_curve = float(df.loc[idx, 'YieldCurve'])
 
             new_rows_count += 1
 

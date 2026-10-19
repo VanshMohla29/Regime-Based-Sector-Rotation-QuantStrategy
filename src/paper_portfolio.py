@@ -122,10 +122,10 @@ def compute_sell_charges(turnover, n_scrips=1):
 MIN_HOLD_DAYS = 5
 
 # Capital protection parameters (-6% drawdown stop with T+0 execution + 20 SMA re-entry)
-STOP_LOSS_DD       = -0.06   # -6% portfolio drawdown stop to 100% Cash / Liquid (T+0 execution)
-STOP_REENTRY_MA    = 20      # 20-day Simple Moving Average on NIFTY 50
+STOP_LOSS_DD       = -0.02   # -6% portfolio drawdown stop to 100% Cash / Liquid (T+0 execution)
+STOP_REENTRY_MA    = 10      # 20-day Simple Moving Average on NIFTY 50
 STOP_REENTRY_TYPE  = 'SMA'   # 'EMA' or 'SMA'
-STOP_COOLDOWN_DAYS = 3      # Minimum 3 trading days in Cash before checking re-entry
+STOP_COOLDOWN_DAYS = 1      # Minimum 3 trading days in Cash before checking re-entry
 
 # Trade execution timing: 'T+0' (same-day execution) or 'T+1' (next-day execution)
 # T+0 executes stop exit, re-entry, and regime rebalances on signal date itself
@@ -270,6 +270,12 @@ def fetch_etf_prices(start_date="2024-01-01"):
     print(f"\n[Paper Portfolio] Fetching actual ETF end-of-day prices...")
     tickers = list(ETF_TICKERS.values())
     raw = yf.download(tickers, start=start_date, auto_adjust=True, progress=False)['Close']
+    if isinstance(raw, pd.Series):
+        raw = raw.to_frame(tickers[0])
+    raw.index = pd.to_datetime(raw.index)
+    if raw.index.tz is not None:
+        raw.index = raw.index.tz_localize(None)
+    raw.index = raw.index.normalize()
 
     etf_prices = pd.DataFrame(index=raw.index)
     for etf_name, ticker in ETF_TICKERS.items():

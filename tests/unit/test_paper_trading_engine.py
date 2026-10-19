@@ -110,9 +110,9 @@ def test_t0_reentry_happens_same_day_cooldown_is_met(idx):
     h = _run(idx, mode="T+0")
     stop_row = int(np.argmax(h['In_Cash'].values))
 
-    # days_in_cash starts at 0 on the stop day -> cooldown of 3 is met 3 sessions later
-    assert h['In_Cash'].iloc[stop_row + 1]
-    assert h['In_Cash'].iloc[stop_row + 2]
+    # days_in_cash starts at 0 on the stop day -> cooldown is met STOP_COOLDOWN_DAYS sessions later
+    for offset in range(1, pp.STOP_COOLDOWN_DAYS):
+        assert h['In_Cash'].iloc[stop_row + offset]
     back = stop_row + pp.STOP_COOLDOWN_DAYS
     assert not h['In_Cash'].iloc[back]
     assert h['Equity'].iloc[back] > 0, "T+0 re-entry buys on the signal date, not the next day"
@@ -128,7 +128,8 @@ def test_no_reentry_while_nifty_below_moving_average(idx):
 
 
 def test_cash_earns_repo_yield_while_parked(idx):
-    h = _run(idx)
+    falling = 20000 * np.exp(-0.002 * np.arange(N))
+    h = _run(idx, nifty=falling)
     stop_row = int(np.argmax(h['In_Cash'].values))
     c0, c1 = h['Cash'].iloc[stop_row], h['Cash'].iloc[stop_row + 1]
 

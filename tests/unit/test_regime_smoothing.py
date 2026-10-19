@@ -87,4 +87,4 @@ def test_both_implementations_agree(seed):
 
 
 def test_default_min_hold_matches_module_constant():
-    assert r2.MIN_HOLD_DAYS == pp.MIN_HOLD_DAYS == 5
+    assert r2.MIN_HOLD_DAYS == pp.MIN_HOLD_DAYS

@@ -1,35 +1,35 @@
 {
   "baseline_parameters": {
-    "stop_loss_dd": -0.06,
-    "cooldown_days": 3,
-    "reentry_ma_window": 20,
+    "stop_loss_dd": -0.02,
+    "cooldown_days": 1,
+    "reentry_ma_window": 10,
     "reentry_ma_type": "SMA",
     "regime_min_hold_days": 5
   },
   "baseline_performance": {
-    "sharpe_ratio": 1.106,
-    "annualized_return_pct": 27.28,
-    "max_drawdown_pct": -24.9
+    "sharpe_ratio": 1.582,
+    "annualized_return_pct": 31.08,
+    "max_drawdown_pct": -11.33
   },
   "benchmark_nifty_bh": {
-    "sharpe_ratio": 0.22,
-    "annualized_return_pct": 10.04,
+    "sharpe_ratio": 0.218,
+    "annualized_return_pct": 9.99,
     "max_drawdown_pct": -38.44
   },
   "plateau_neighborhood_3x3": {
-    "mean_sharpe": 1.01,
-    "std_sharpe": 0.078,
-    "coefficient_of_variation_pct": 7.72,
-    "min_sharpe": 0.896,
-    "max_sharpe": 1.106
+    "mean_sharpe": 1.37,
+    "std_sharpe": 0.197,
+    "coefficient_of_variation_pct": 14.41,
+    "min_sharpe": 1.167,
+    "max_sharpe": 1.582
   },
   "global_parameter_grid": {
-    "mean_sharpe": 0.862,
-    "std_sharpe": 0.089,
-    "min_sharpe": 0.718,
-    "max_sharpe": 1.106,
-    "coefficient_of_variation_pct": 10.36,
+    "mean_sharpe": 0.994,
+    "std_sharpe": 0.157,
+    "min_sharpe": 0.764,
+    "max_sharpe": 1.582,
+    "coefficient_of_variation_pct": 15.82,
     "pct_combinations_beating_bh": 100.0,
-    "worst_case_outperformance_vs_bh_pct": 225.8
+    "worst_case_outperformance_vs_bh_pct": 251.0
   }
 }

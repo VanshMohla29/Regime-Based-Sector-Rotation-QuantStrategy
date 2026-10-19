@@ -102,3 +102,48 @@ def test_expected_last_session_skips_weekends_and_open_market():
     assert ms.expected_last_session(datetime(2026, 10, 19, 10, 0)) == pd.Timestamp("2026-10-16")
     # Monday evening -> Monday
     assert ms.expected_last_session(datetime(2026, 10, 19, 17, 0)) == pd.Timestamp("2026-10-19")
+
+
+def test_expected_last_session_allow_current_day():
+    from datetime import datetime
+    # Sunday -> Friday even with allow_current_day=True
+    assert ms.expected_last_session(datetime(2026, 10, 18, 14, 30), allow_current_day=True) == pd.Timestamp("2026-10-16")
+    # Monday morning with allow_current_day=True -> Monday (live session)
+    assert ms.expected_last_session(datetime(2026, 10, 19, 10, 0), allow_current_day=True) == pd.Timestamp("2026-10-19")
+    # Monday evening with allow_current_day=True -> Monday
+    assert ms.expected_last_session(datetime(2026, 10, 19, 17, 0), allow_current_day=True) == pd.Timestamp("2026-10-19")
+
+
+def test_market_upsert_updates_current_day_in_place(store, monkeypatch):
+    from datetime import datetime, timedelta
+    today_ts = pd.Timestamp(datetime.now().date())
+    idx = pd.date_range(today_ts - timedelta(days=2), today_ts, freq="D")
+    s1 = pd.Series([20000.0, 20100.0, 20200.0], index=idx)
+    assert store.upsert_market_closes(s1, store.NIFTY_SYMBOL) == 3
+
+    # Update today's price mid-day
+    s2 = pd.Series([20000.0, 20100.0, 20350.0], index=idx)
+    updated = store.upsert_market_closes(s2, store.NIFTY_SYMBOL)
+    assert updated == 1
+
+    df = store.load_market_closes()
+    assert len(df) == 3
+    assert df.loc[today_ts, "^NSEI"] == 20350.0
+
+
+def test_sector_upsert_updates_current_day_in_place(store):
+    from datetime import datetime, timedelta
+    today_ts = pd.Timestamp(datetime.now().date())
+    idx = pd.date_range(today_ts - timedelta(days=2), today_ts, freq="D")
+    df1 = pd.DataFrame(0.01, index=idx, columns=list(store.SECTOR_COLUMNS))
+    assert store.upsert_sector_returns(df1) == 3
+
+    # Update today's returns
+    df2 = df1.copy()
+    df2.loc[today_ts, "BANKBEES"] = 0.05
+    updated = store.upsert_sector_returns(df2)
+    assert updated == 1
+
+    loaded = store.load_sector_returns()
+    assert len(loaded) == 3
+    assert loaded.loc[today_ts, "BANKBEES"] == 0.05

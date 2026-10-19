@@ -530,7 +530,7 @@ The pipeline automatically generates **10 publication-grade figures** saved dire
 
 | **Fig 8** | `fig8_new_macro_signals.png` | Sovereign yield curve spread (10Y-2Y), CPI MoM, WPI MoM, IIP growth, real policy rate, and 2D regime phase space. | Connects macroeconomic cycles and high-frequency sequential price dynamics with equity regime transitions. |
 | **Fig 9** | `fig9_paper_portfolio.png` | Live Paper Trading Portfolio Dashboard: NAV vs NIFTY benchmark with regime background shading, Current Portfolio Donut Pie Chart, Drawdown tracking with -6% Stop line, Daily P&L, Current Holdings Table, and Performance Summary card with itemized regulatory friction charges. | Validates true forward out-of-sample execution on actual EOD ETF prices with whole share rounding and full SEBI/IT Act regulatory tax and fee deductions. |
-| **Fig 10** | `fig10_parameter_stability.png` | Multi-dimensional parameter sensitivity heatmaps across Stoploss (-8% to -18%), Cooldown Days (1 to 15), Minimum Hold Period, and Moving Average variations. | Verifies broad topological plateau and absence of fragile overfitted local optima. |
+| **Fig 10** | `fig10_parameter_stability.png` | Multi-dimensional parameter sensitivity heatmaps across Stoploss (-2% to -20%), Cooldown Days (1 to 20), Minimum Hold Period, and Moving Average variations. | Verifies broad topological plateau and absence of fragile overfitted local optima. |
 
 ---
 

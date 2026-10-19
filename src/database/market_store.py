@@ -65,16 +65,17 @@ def _naive_ts(value) -> pd.Timestamp:
     return ts.normalize()
 
 
-def expected_last_session(now: Optional[datetime] = None) -> pd.Timestamp:
+def expected_last_session(now: Optional[datetime] = None, allow_current_day: bool = False) -> pd.Timestamp:
     """
-    Most recent weekday whose NSE session should be fully settled (IST).
-    Exchange holidays are not modelled: on a holiday the delta fetch simply
-    returns no new rows, which is cheap and harmless.
+    Most recent weekday whose NSE session should be ingested.
+    If allow_current_day is True and now is a weekday (Monday-Friday), returns today's
+    date so that live intraday bars are ingested and updated.
+    If allow_current_day is False, returns the last settled weekday session.
     """
     if now is None:
         now = datetime.utcnow() + _IST_OFFSET
     day = pd.Timestamp(now.date())
-    if now.time() < _MARKET_FINAL_TIME:
+    if not allow_current_day and now.time() < _MARKET_FINAL_TIME:
         day -= pd.Timedelta(days=1)
     while day.weekday() >= 5:
         day -= pd.Timedelta(days=1)
@@ -130,9 +131,10 @@ def load_market_closes(start: Optional[str] = None) -> pd.DataFrame:
 
 def upsert_market_closes(closes: pd.Series, symbol: str, source: str = "YAHOO") -> int:
     """
-    Inserts closing levels for ``symbol`` that are not already stored.
-    Existing rows are never overwritten (history is immutable once settled).
-    Returns the number of rows inserted.
+    Inserts closing levels for ``symbol`` that are not already stored, or updates
+    the current day's live session bar in place.
+    Existing past settled rows are never overwritten.
+    Returns the number of rows inserted or updated.
     """
     closes = closes.dropna()
     if closes.empty:
@@ -141,24 +143,39 @@ def upsert_market_closes(closes: pd.Series, symbol: str, source: str = "YAHOO") 
     closes.index = to_naive_index(closes.index)
     closes = closes[~closes.index.duplicated(keep="last")]
 
+    today_ts = pd.Timestamp((datetime.utcnow() + _IST_OFFSET).date())
+
     with get_db() as db:
         lo, hi = closes.index.min().to_pydatetime(), closes.index.max().to_pydatetime()
-        existing = {
-            _naive_ts(r[0])
-            for r in db.query(MarketBar.time)
+        existing_rows = {
+            _naive_ts(r.time): r
+            for r in db.query(MarketBar)
             .filter(MarketBar.symbol == symbol, MarketBar.time >= lo, MarketBar.time <= hi)
             .all()
         }
         prev_close = None
         objs = []
+        updated_count = 0
         for ts, px in closes.items():
             px = float(px)
             ret = None
             if prev_close is not None and prev_close > 0 and px > 0:
                 ret = float(np.log(px / prev_close))
             prev_close = px
-            if ts in existing:
+
+            if ts in existing_rows:
+                if ts >= today_ts:
+                    rec = existing_rows[ts]
+                    if abs((rec.close or 0.0) - px) > 1e-6 or (ret is not None and abs((rec.returns or 0.0) - ret) > 1e-6):
+                        rec.close = px
+                        rec.open = rec.open or px
+                        rec.high = max(rec.high or px, px)
+                        rec.low = min(rec.low or px, px)
+                        rec.returns = ret
+                        rec.source = source
+                        updated_count += 1
                 continue
+
             objs.append(
                 MarketBar(
                     time=ts.to_pydatetime(),
@@ -174,7 +191,9 @@ def upsert_market_closes(closes: pd.Series, symbol: str, source: str = "YAHOO") 
             )
         if objs:
             db.bulk_save_objects(objs)
-    return len(objs)
+        if updated_count:
+            db.commit()
+    return len(objs) + updated_count
 
 
 # ── Sector returns ───────────────────────────────────────────────────
@@ -201,7 +220,7 @@ def load_sector_returns(start: Optional[str] = None) -> pd.DataFrame:
 
 
 def upsert_sector_returns(df: pd.DataFrame, source: str = "YAHOO") -> int:
-    """Inserts sector-return rows whose date is not yet stored. Returns rows inserted."""
+    """Inserts or updates sector-return rows. Returns rows inserted or updated."""
     df = df.dropna()
     if df.empty:
         return 0
@@ -209,20 +228,37 @@ def upsert_sector_returns(df: pd.DataFrame, source: str = "YAHOO") -> int:
     df.index = to_naive_index(df.index)
     df = df[~df.index.duplicated(keep="last")]
 
+    today_ts = pd.Timestamp((datetime.utcnow() + _IST_OFFSET).date())
+
     with get_db() as db:
         lo, hi = df.index.min().to_pydatetime(), df.index.max().to_pydatetime()
-        existing = {
-            _naive_ts(r[0])
-            for r in db.query(SectorReturn.time)
+        existing_rows = {
+            _naive_ts(r.time): r
+            for r in db.query(SectorReturn)
             .filter(SectorReturn.time >= lo, SectorReturn.time <= hi)
             .all()
         }
         objs = []
+        updated_count = 0
         for ts, row in df.iterrows():
-            if ts in existing:
+            if ts in existing_rows:
+                if ts >= today_ts:
+                    rec = existing_rows[ts]
+                    changed = False
+                    for col, attr in SECTOR_COLUMNS.items():
+                        new_val = float(row[col])
+                        old_val = getattr(rec, attr) or 0.0
+                        if abs(old_val - new_val) > 1e-6:
+                            setattr(rec, attr, new_val)
+                            changed = True
+                    if changed:
+                        rec.source = source
+                        updated_count += 1
                 continue
             kwargs = {attr: float(row[col]) for col, attr in SECTOR_COLUMNS.items()}
             objs.append(SectorReturn(time=ts.to_pydatetime(), source=source, **kwargs))
         if objs:
             db.bulk_save_objects(objs)
-    return len(objs)
+        if updated_count:
+            db.commit()
+    return len(objs) + updated_count

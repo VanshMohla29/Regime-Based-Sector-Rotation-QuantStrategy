@@ -166,7 +166,7 @@ def perform_parameter_stability_analysis(df_res, df_sec, learned_mix):
 
     ma_filter_20 = (nifty_prices > nifty_prices.rolling(STOP_REENTRY_MA, min_periods=1).mean()).values
 
-    stop_dd_grid = [-0.06, -0.08, -0.10, -0.12, -0.14, -0.16, -0.18, -0.20, -0.25]
+    stop_dd_grid = [-0.02, -0.04, -0.06, -0.08, -0.10, -0.12, -0.14, -0.16, -0.18, -0.20]
     cooldown_grid = [1, 2, 3, 5, 7, 10, 15, 20]
 
     n_stops = len(stop_dd_grid)
@@ -198,7 +198,7 @@ def perform_parameter_stability_analysis(df_res, df_sec, learned_mix):
             cash_days_pct_matrix[i, j] = (dc / len(common_idx)) * 100
 
     # ─────────────────────────────────────────────────────────────────
-    # GRID 2: Re-entry Moving Average Window vs Stop-Loss DD (Fixed Cooldown=5d)
+    # GRID 2: Re-entry Moving Average Window vs Stop-Loss DD (Fixed Baseline Cooldown)
     # ─────────────────────────────────────────────────────────────────
     ma_window_grid = [5, 10, 15, 20, 25, 30, 40, 50]
     n_mas = len(ma_window_grid)
@@ -207,12 +207,12 @@ def perform_parameter_stability_analysis(df_res, df_sec, learned_mix):
     for j, ma_w in enumerate(ma_window_grid):
         ma_filt = (nifty_prices > nifty_prices.rolling(ma_w, min_periods=1).mean()).values
         for i, s_dd in enumerate(stop_dd_grid):
-            rets, _, _ = fast_strategy_simulation(base_ret_def, daily_repo, ma_filt, s_dd, cooldown_days=5)
+            rets, _, _ = fast_strategy_simulation(base_ret_def, daily_repo, ma_filt, s_dd, cooldown_days=STOP_COOLDOWN_DAYS)
             sh = (rets.mean() - 0.06 / 252) / (rets.std() + 1e-8) * np.sqrt(252)
             sharpe_ma_matrix[i, j] = sh
 
     # ─────────────────────────────────────────────────────────────────
-    # GRID 3: Regime Smoothing Min-Hold Days vs Stop-Loss DD (Fixed Cooldown=5d, MA=20)
+    # GRID 3: Regime Smoothing Min-Hold Days vs Stop-Loss DD (Fixed Baseline Cooldown, MA=20)
     # ─────────────────────────────────────────────────────────────────
     min_hold_grid = [1, 2, 3, 5, 7, 10, 14]
     n_holds = len(min_hold_grid)
@@ -233,16 +233,16 @@ def perform_parameter_stability_analysis(df_res, df_sec, learned_mix):
             b_ret[k] = sum(w.get(s, 0.0) * float(sec_sub.loc[idx, s]) for s in sector_names if s in w and not pd.isna(sec_sub.loc[idx, s]))
 
         for i, s_dd in enumerate(stop_dd_grid):
-            rets, _, _ = fast_strategy_simulation(b_ret, daily_repo, ma_filter_20, s_dd, cooldown_days=5)
+            rets, _, _ = fast_strategy_simulation(b_ret, daily_repo, ma_filter_20, s_dd, cooldown_days=STOP_COOLDOWN_DAYS)
             sh = (rets.mean() - 0.06 / 252) / (rets.std() + 1e-8) * np.sqrt(252)
             sharpe_hold_matrix[i, j] = sh
 
     # ─────────────────────────────────────────────────────────────────
     # QUANTITATIVE PLATEAU & SENSITIVITY METRICS
     # ─────────────────────────────────────────────────────────────────
-    # Identify index of baseline parameter: stop_dd = -0.12 (idx 3), cooldown = 5d (idx 3)
-    base_i = stop_dd_grid.index(STOP_LOSS_DD) if STOP_LOSS_DD in stop_dd_grid else 3
-    base_j = cooldown_grid.index(STOP_COOLDOWN_DAYS) if STOP_COOLDOWN_DAYS in cooldown_grid else 3
+    # Identify index of baseline parameter operating point
+    base_i = stop_dd_grid.index(STOP_LOSS_DD) if STOP_LOSS_DD in stop_dd_grid else int(np.argmin([abs(s - STOP_LOSS_DD) for s in stop_dd_grid]))
+    base_j = cooldown_grid.index(STOP_COOLDOWN_DAYS) if STOP_COOLDOWN_DAYS in cooldown_grid else int(np.argmin([abs(c - STOP_COOLDOWN_DAYS) for c in cooldown_grid]))
 
     baseline_sharpe = sharpe_matrix[base_i, base_j]
     baseline_ann_ret = ann_ret_matrix[base_i, base_j]
@@ -324,7 +324,7 @@ def plot_parameter_stability_dashboard(res, out_dir):
     gs = gridspec.GridSpec(2, 3, figure=fig, hspace=0.32, wspace=0.28,
                            left=0.06, right=0.96, top=0.92, bottom=0.07)
 
-    stop_labels = [f'{int(s * 100)}%' for s in res['stop_dd_grid']]
+    stop_labels = [f'{int(round(s * 100))}%' for s in res['stop_dd_grid']]
     cd_labels = [f'{c}d' for c in res['cooldown_grid']]
     ma_labels = [f'{m}d' for m in res['ma_window_grid']]
     hold_labels = [f'{h}d' for h in res['min_hold_grid']]
@@ -349,7 +349,7 @@ def plot_parameter_stability_dashboard(res, out_dir):
     ax1.set_yticklabels(stop_labels, fontsize=8.5, color='#d1d5db')
     ax1.set_xlabel('Re-entry Cooldown Period (Trading Days)', fontsize=9, color='#9ca3af', labelpad=6)
     ax1.set_ylabel('Stop-Loss Drawdown Threshold (%)', fontsize=9, color='#9ca3af', labelpad=6)
-    ax1.set_title('A. Sharpe Ratio Stability Grid\n(Green Box: Baseline Operating Point -12%, 5d)', fontsize=10, color='#f3f4f6', pad=8, fontweight='bold')
+    ax1.set_title(f'A. Sharpe Ratio Stability Grid\n(Green Box: Baseline Operating Point {int(round(STOP_LOSS_DD*100))}%, {STOP_COOLDOWN_DAYS}d)', fontsize=10, color='#f3f4f6', pad=8, fontweight='bold')
 
     # Cell text annotations with luminance-aware contrast
     v1_min, v1_max = res['sharpe_matrix'].min(), res['sharpe_matrix'].max()
@@ -442,7 +442,7 @@ def plot_parameter_stability_dashboard(res, out_dir):
     ax4.set_yticklabels(stop_labels, fontsize=8.5, color='#d1d5db')
     ax4.set_xlabel('Trend Re-entry Moving Average Window', fontsize=9, color='#9ca3af', labelpad=6)
     ax4.set_ylabel('Stop-Loss Drawdown Threshold (%)', fontsize=9, color='#9ca3af', labelpad=6)
-    ax4.set_title('D. Trend Re-entry MA Window Sensitivity\n(Sharpe Ratio across 5 to 50 SMA)', fontsize=10, color='#f3f4f6', pad=8, fontweight='bold')
+    ax4.set_title(f'D. Trend Re-entry MA Window Sensitivity\n(Sharpe Ratio across 5 to 50 SMA at {STOP_COOLDOWN_DAYS}d Cooldown)', fontsize=10, color='#f3f4f6', pad=8, fontweight='bold')
 
     base_ma_j = res['ma_window_grid'].index(STOP_REENTRY_MA)
     v4_min, v4_max = res['sharpe_ma_matrix'].min(), res['sharpe_ma_matrix'].max()
@@ -473,7 +473,7 @@ def plot_parameter_stability_dashboard(res, out_dir):
     ax5.set_yticklabels(stop_labels, fontsize=8.5, color='#d1d5db')
     ax5.set_xlabel('Regime Causal Min-Hold Days (Anti-Whipsaw)', fontsize=9, color='#9ca3af', labelpad=6)
     ax5.set_ylabel('Stop-Loss Drawdown Threshold (%)', fontsize=9, color='#9ca3af', labelpad=6)
-    ax5.set_title('E. Causal Regime Lockout Sensitivity\n(Sharpe Ratio across 1 to 14 Days Min-Hold)', fontsize=10, color='#f3f4f6', pad=8, fontweight='bold')
+    ax5.set_title(f'E. Causal Regime Lockout Sensitivity\n(Sharpe Ratio across 1 to 14 Days Min-Hold at {STOP_COOLDOWN_DAYS}d Cooldown, {STOP_REENTRY_MA} SMA)', fontsize=10, color='#f3f4f6', pad=8, fontweight='bold')
 
     base_hold_j = res['min_hold_grid'].index(MIN_HOLD_DAYS)
     v5_min, v5_max = res['sharpe_hold_matrix'].min(), res['sharpe_hold_matrix'].max()
@@ -513,7 +513,7 @@ def plot_parameter_stability_dashboard(res, out_dir):
     ax6.axhline(res['bh_sh'], color='#ef4444', lw=1.5, ls='--',
                 label=f'Buy & Hold Benchmark (Sharpe = {res["bh_sh"]:.2f})')
     ax6.axvline(STOP_LOSS_DD * 100, color='#38bdf8', lw=1.2, ls=':',
-                label=f'Baseline Operating Point ({int(STOP_LOSS_DD*100)}%)')
+                label=f'Baseline Operating Point ({int(round(STOP_LOSS_DD*100))}%)')
 
     ax6.set_xlabel('Stop-Loss Drawdown Threshold (%)', fontsize=9, color='#9ca3af', labelpad=4)
     ax6.set_ylabel('Annualized Sharpe Ratio', fontsize=9, color='#9ca3af', labelpad=4)
@@ -524,7 +524,7 @@ def plot_parameter_stability_dashboard(res, out_dir):
     # Inset Statistical Scorecard
     scorecard_text = (
         f"PARAMETER STABILITY METRICS:\n"
-        f"• Baseline Sharpe (-12%, 5d) : {res['baseline_sharpe']:.2f}\n"
+        f"• Baseline Sharpe ({int(round(STOP_LOSS_DD*100))}%, {STOP_COOLDOWN_DAYS}d) : {res['baseline_sharpe']:.2f}\n"
         f"• 3×3 Neighborhood Mean      : {res['neigh_mean']:.2f} (±{res['neigh_std']:.2f})\n"
         f"• Neighborhood Coeff of Var  : {res['neigh_cv']*100:.1f}%\n"
         f"• Global Grid Sharpe Range   : [{res['glob_min']:.2f}, {res['glob_max']:.2f}]\n"
@@ -623,7 +623,7 @@ def print_scorecard(res, report):
     print("\n" + "=" * 76)
     print("  PARAMETER STABILITY & ROBUSTNESS TEST  —  SCORECARD SUMMARY")
     print("=" * 76)
-    print(f"  Operating Point      : Stop-Loss = {int(STOP_LOSS_DD*100)}% | Cooldown = {STOP_COOLDOWN_DAYS}d | Re-entry = {STOP_REENTRY_MA} {STOP_REENTRY_TYPE}")
+    print(f"  Operating Point      : Stop-Loss = {int(round(STOP_LOSS_DD*100))}% | Cooldown = {STOP_COOLDOWN_DAYS}d | Re-entry = {STOP_REENTRY_MA} {STOP_REENTRY_TYPE}")
     print(f"  Baseline Performance : Sharpe = {res['baseline_sharpe']:.2f} | Ann. Ret = +{res['baseline_ann_ret']:.1f}% | Max DD = {res['baseline_max_dd']:.1f}%")
     print(f"  Benchmark (B&H NIFTY): Sharpe = {res['bh_sh']:.2f} | Ann. Ret = +{res['bh_ann']:.1f}% | Max DD = {res['bh_mdd']:.1f}%")
     print("─" * 76)
