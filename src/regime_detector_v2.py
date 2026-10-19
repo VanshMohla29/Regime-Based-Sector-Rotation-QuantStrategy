@@ -147,12 +147,9 @@ def load_india_macro(target_index=None):
                     try:
                         df_canon = pd.read_csv(macro_csv, index_col=0, parse_dates=True)
                         overlap = df_m.index.intersection(df_canon.index)
-                        if 'WPI_YoY' in df_canon.columns and len(overlap) > 0:
-                            df_m.loc[overlap, 'WPI_YoY'] = df_canon.loc[overlap, 'WPI_YoY']
-                        if 'WPI_MoM' in df_canon.columns and len(overlap) > 0:
-                            df_m.loc[overlap, 'WPI_MoM'] = df_canon.loc[overlap, 'WPI_MoM']
-                        if 'WPI_MoM_vs_MA3M' in df_canon.columns and len(overlap) > 0:
-                            df_m.loc[overlap, 'WPI_MoM_vs_MA3M'] = df_canon.loc[overlap, 'WPI_MoM_vs_MA3M']
+                        for col in ['RepoRate', 'CPI_YoY', 'CPI_MoM', 'IIP_YoY', 'WPI_YoY', 'WPI_MoM', 'WPI_MoM_vs_MA3M', 'GSecYield10', 'GSecYield2', 'YieldCurve']:
+                            if col in df_canon.columns and col in df_m.columns and len(overlap) > 0:
+                                df_m.loc[overlap, col] = df_canon.loc[overlap, col]
                     except Exception:
                         pass
 

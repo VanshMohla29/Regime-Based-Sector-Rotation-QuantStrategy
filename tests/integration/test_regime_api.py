@@ -191,7 +191,7 @@ def test_macro_ingest_endpoint(client, monkeypatch):
         "cpi_mom": 0.2,
         "iip_yoy": 4.5,
         "wpi_yoy": 11.386139,
-        "repo_rate": 6.5,
+        "repo_rate": 5.5,
         "gsec_10y": 7.05,
         "gsec_2y": 5.25,
         "forward_fill": True,
