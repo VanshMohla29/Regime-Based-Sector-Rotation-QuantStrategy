@@ -51,4 +51,7 @@ htmlcov/
 *.db
 *.sqlite
 *.sqlite3
-
+#others
+*.docx
+*.doc
+*_docx.py
