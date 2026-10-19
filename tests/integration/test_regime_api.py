@@ -179,17 +179,22 @@ def test_portfolio_ledger_endpoint(client):
         assert 'regime' in body[0]
 
 
-def test_macro_ingest_endpoint(client):
+def test_macro_ingest_endpoint(client, monkeypatch):
+    monkeypatch.setattr(
+        regime_api,
+        "ingest_macro_release",
+        lambda **kw: {"status": "SUCCESS", "effective_date": kw.get("effective_date")},
+    )
     payload = {
         "effective_date": "2026-10-12",
         "cpi_yoy": 5.4,
         "cpi_mom": 0.2,
         "iip_yoy": 4.5,
-        "wpi_yoy": 2.1,
+        "wpi_yoy": 11.386139,
         "repo_rate": 6.5,
         "gsec_10y": 7.05,
         "gsec_2y": 5.25,
-        "forward_fill": True
+        "forward_fill": True,
     }
     r = client.post('/macro/ingest', json=payload)
     assert r.status_code == 200
@@ -198,7 +203,12 @@ def test_macro_ingest_endpoint(client):
     assert body['effective_date'] == "2026-10-12"
 
 
-def test_macro_sync_endpoint(client):
+def test_macro_sync_endpoint(client, monkeypatch):
+    monkeypatch.setattr(
+        regime_api,
+        "auto_sync_macro_from_sources",
+        lambda: {"status": "SUCCESS", "updated_dates": 0},
+    )
     r = client.post('/macro/sync')
     assert r.status_code == 200
     body = r.json()

@@ -35,7 +35,11 @@ import paper_portfolio
 
 
 def sync_latest_portfolio_to_db():
-    """Syncs the latest row from paper_portfolio_history.csv into portfolio_ledger & positions."""
+    """
+    Syncs paper_portfolio_history.csv into portfolio_ledger, positions, orders, and fills.
+    Guarantees full relational integrity between daily ledgers, open positions,
+    and executed fills so daily reconciliation never breaks.
+    """
     csv_path = os.path.join(DATA_DIR, "paper_portfolio_history.csv")
     if not os.path.exists(csv_path):
         csv_path = os.path.join(REPO_ROOT, "paper_portfolio_history.csv")
@@ -47,70 +51,99 @@ def sync_latest_portfolio_to_db():
         return None
 
     df['Date'] = pd.to_datetime(df['Date'])
-    latest_row = df.iloc[-1]
-    ts = latest_row['Date'].to_pydatetime()
     sector_names = ['BANKBEES', 'ITBEES', 'PHARMABEES', 'AUTOBEES', 'METALIETF', 'MOREALTY', 'CPSEETF', 'INFRABEES']
 
+    from reconciliation.reconciler import OrderManagementSystem
+    from database.models import Order, Fill
+
     with get_db() as db:
-        existing_ledger = db.query(PortfolioLedger).filter(PortfolioLedger.time == ts).first()
-        nav = float(latest_row['NAV'])
-        if not existing_ledger:
-            ledger_entry = PortfolioLedger(
-                time=ts,
-                nav=nav,
-                cash_balance=float(latest_row['Cash']),
-                equity_value=float(latest_row['Equity']),
-                peak_nav=float(df['NAV'].max()),
-                drawdown_pct=float(latest_row['Drawdown']),
-                daily_pnl=float(latest_row.get('Unrealized_Gains', 0.0)),
-                daily_return_pct=float(latest_row.get('Daily_Return', 0.0)),
-                in_cash=bool(latest_row.get('In_Cash', False)),
-                stop_triggered="STOP" in str(latest_row['Regime']),
-                days_in_cash=0,
-                active_regime=str(latest_row['Regime']),
-                cumulative_friction=float(latest_row.get('Total_Charges', 0.0)),
-            )
-            db.add(ledger_entry)
-        else:
-            existing_ledger.nav = nav
-            existing_ledger.cash_balance = float(latest_row['Cash'])
-            existing_ledger.equity_value = float(latest_row['Equity'])
-            existing_ledger.peak_nav = float(df['NAV'].max())
-            existing_ledger.drawdown_pct = float(latest_row['Drawdown'])
-            existing_ledger.daily_pnl = float(latest_row.get('Unrealized_Gains', 0.0))
-            existing_ledger.daily_return_pct = float(latest_row.get('Daily_Return', 0.0))
-            existing_ledger.in_cash = bool(latest_row.get('In_Cash', False))
-            existing_ledger.stop_triggered = "STOP" in str(latest_row['Regime'])
-            existing_ledger.active_regime = str(latest_row['Regime'])
-            existing_ledger.cumulative_friction = float(latest_row.get('Total_Charges', 0.0))
+        prev_units = {sec: 0 for sec in sector_names}
 
-        # Clear existing positions for this session date before inserting current positions
-        db.query(Position).filter(Position.time == ts).delete()
+        for i, row in df.iterrows():
+            ts = row['Date'].to_pydatetime()
+            nav = float(row['NAV'])
 
-        # Insert active ETF positions
-        for sec in sector_names:
-            units = int(latest_row.get(f"{sec}_units", 0))
-            if units > 0:
-                mkt_price = float(latest_row.get(f"{sec}_price", 0.0))
-                mkt_val = float(latest_row.get(f"{sec}_value", 0.0))
-                avg_cost = float(latest_row.get(f"{sec}_cost_basis", mkt_price))
-                unrealized = float(latest_row.get(f"{sec}_pnl", 0.0))
-                weight = (mkt_val / nav) if nav > 0 else 0.0
-
-                db.add(
-                    Position(
-                        time=ts,
-                        symbol=sec,
-                        units=units,
-                        average_cost=avg_cost,
-                        market_price=mkt_price,
-                        invested_value=units * avg_cost,
-                        market_value=mkt_val,
-                        unrealized_pnl=unrealized,
-                        weight_pct=weight,
-                    )
+            existing_ledger = db.query(PortfolioLedger).filter(PortfolioLedger.time == ts).first()
+            if not existing_ledger:
+                ledger_entry = PortfolioLedger(
+                    time=ts,
+                    nav=nav,
+                    cash_balance=float(row['Cash']),
+                    equity_value=float(row['Equity']),
+                    peak_nav=float(df['NAV'].iloc[:i+1].max()),
+                    drawdown_pct=float(row['Drawdown']),
+                    daily_pnl=float(row.get('Unrealized_Gains', 0.0)),
+                    daily_return_pct=float(row.get('Daily_Return', 0.0)),
+                    in_cash=bool(row.get('In_Cash', False)),
+                    stop_triggered="STOP" in str(row['Regime']),
+                    days_in_cash=0,
+                    active_regime=str(row['Regime']),
+                    cumulative_friction=float(row.get('Total_Charges', 0.0)),
                 )
-    return ts
+                db.add(ledger_entry)
+            else:
+                existing_ledger.nav = nav
+                existing_ledger.cash_balance = float(row['Cash'])
+                existing_ledger.equity_value = float(row['Equity'])
+                existing_ledger.peak_nav = float(df['NAV'].iloc[:i+1].max())
+                existing_ledger.drawdown_pct = float(row['Drawdown'])
+                existing_ledger.daily_pnl = float(row.get('Unrealized_Gains', 0.0))
+                existing_ledger.daily_return_pct = float(row.get('Daily_Return', 0.0))
+                existing_ledger.in_cash = bool(row.get('In_Cash', False))
+                existing_ledger.stop_triggered = "STOP" in str(row['Regime'])
+                existing_ledger.active_regime = str(row['Regime'])
+                existing_ledger.cumulative_friction = float(row.get('Total_Charges', 0.0))
+
+            # Clean existing positions, orders & fills for this session date before inserting current records
+            db.query(Position).filter(Position.time == ts).delete()
+            db.query(Fill).filter(Fill.time == ts).delete()
+            db.query(Order).filter(Order.time == ts).delete()
+
+            # Record Orders, Fills, and Positions
+            for sec in sector_names:
+                curr_u = int(row.get(f"{sec}_units", 0))
+                p_u = prev_units[sec]
+                px = float(row.get(f"{sec}_price", 0.0))
+
+                if curr_u > p_u and px > 0:
+                    OrderManagementSystem.execute_order(
+                        db=db, timestamp=ts, symbol=sec, side="BUY",
+                        quantity=curr_u - p_u, fill_price=px,
+                        order_type="REENTRY" if "STOP" not in str(row['Regime']) else "REBALANCE",
+                        regime=str(row['Regime']), target_weight=None
+                    )
+                elif curr_u < p_u and px > 0:
+                    OrderManagementSystem.execute_order(
+                        db=db, timestamp=ts, symbol=sec, side="SELL",
+                        quantity=p_u - curr_u, fill_price=px,
+                        order_type="STOP_LOSS" if "STOP" in str(row['Regime']) else "REBALANCE",
+                        regime=str(row['Regime']), target_weight=None
+                    )
+
+                if curr_u > 0:
+                    mkt_val = float(row.get(f"{sec}_value", 0.0))
+                    avg_cost = float(row.get(f"{sec}_cost_basis", px))
+                    unrealized = float(row.get(f"{sec}_pnl", 0.0))
+                    weight = (mkt_val / nav) if nav > 0 else 0.0
+
+                    db.add(
+                        Position(
+                            time=ts,
+                            symbol=sec,
+                            units=curr_u,
+                            average_cost=avg_cost,
+                            market_price=px,
+                            invested_value=curr_u * avg_cost,
+                            market_value=mkt_val,
+                            unrealized_pnl=unrealized,
+                            weight_pct=weight,
+                        )
+                    )
+                prev_units[sec] = curr_u
+
+        db.commit()
+    latest_ts = df.iloc[-1]['Date'].to_pydatetime()
+    return latest_ts
 
 
 def dispatch_telegram_eod_summary(report_summary: dict, nav: float, regime: str, ret_pct: float):

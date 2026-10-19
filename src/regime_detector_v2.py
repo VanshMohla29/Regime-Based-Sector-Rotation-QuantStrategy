@@ -79,7 +79,7 @@ REGIME_COLORS = {
 
 
 # Minimum holding period (trading days) to prevent whipsaw
-MIN_HOLD_DAYS = 5
+MIN_HOLD_DAYS = 14
 
 # Transaction cost parameters
 TC_STT       = 0.001   # 0.10% STT on sell-side (equity delivery)
@@ -87,13 +87,13 @@ TC_SLIPPAGE  = 0.0005  # 0.05% market impact / slippage
 TC_TOTAL     = TC_STT + TC_SLIPPAGE   # applied on every regime switch
 
 # Capital protection parameters (-6% drawdown stop with T+0 execution + 20 SMA re-entry)
-STOP_LOSS_DD       = -0.02   # -6% portfolio drawdown stop to 100% Cash / Liquid (T+0 execution)
-STOP_REENTRY_MA    = 10      # 20-day Simple Moving Average on NIFTY 50
+STOP_LOSS_DD       = -0.01   # -6% portfolio drawdown stop to 100% Cash / Liquid (T+0 execution)
+STOP_REENTRY_MA    = 20      # 20-day Simple Moving Average on NIFTY 50
 STOP_REENTRY_TYPE  = 'SMA'   # 'EMA' or 'SMA'
 STOP_COOLDOWN_DAYS = 1     # Minimum 3 trading days in Cash before checking re-entry
 
 # Walk-forward parameters
-WF_TRAIN_YEARS  = 4   # years of history to train on
+WF_TRAIN_YEARS  = 3   # years of history to train on
 WF_TEST_MONTHS  = 12     # months to predict before re-fitting
 
 
@@ -123,7 +123,6 @@ def load_india_macro(target_index=None):
                     'CPI_MoM': r.cpi_mom,
                     'WPI_YoY': r.wpi_yoy,
                     'WPI_MoM': r.wpi_mom,
-                    'WPI_MoM_vs_MA3M': 0.0,
                     'IIP_YoY': r.iip_yoy,
                     'RepoRate': r.repo_rate,
                     'GSecYield10': r.gsec_10y,
@@ -131,9 +130,42 @@ def load_india_macro(target_index=None):
                     'YieldCurve': r.yield_curve,
                 } for r in rows]
                 df_m = pd.DataFrame(data).set_index('Date')
-                if 'WPI_MoM' in df_m.columns and df_m['WPI_MoM'].notna().any():
-                    wpi_mom = df_m['WPI_MoM']
-                    df_m['WPI_MoM_vs_MA3M'] = (wpi_mom - wpi_mom.rolling(3).mean()).bfill()
+                # Complete any sparse or missing columns
+                if 'GSecYield10' in df_m.columns and 'YieldCurve' in df_m.columns:
+                    if 'GSecYield2' not in df_m.columns or df_m['GSecYield2'].isna().any():
+                        df_m['GSecYield2'] = df_m['GSecYield2'].fillna(df_m['GSecYield10'] - df_m['YieldCurve'])
+                if 'CPI_YoY' in df_m.columns:
+                    if 'CPI_MoM' not in df_m.columns or df_m['CPI_MoM'].isna().sum() > len(df_m) * 0.5:
+                        df_m['CPI_MoM'] = (df_m['CPI_YoY'] - df_m['CPI_YoY'].shift(21)).bfill()
+                    else:
+                        df_m['CPI_MoM'] = df_m['CPI_MoM'].fillna((df_m['CPI_YoY'] - df_m['CPI_YoY'].shift(21)).bfill())
+                # Canonical overlay from verified official historical releases
+                macro_csv = os.path.join(DATA_DIR, 'india_macro_historical.csv')
+                if not os.path.exists(macro_csv):
+                    macro_csv = os.path.join(PROJECT_ROOT, 'india_macro_historical.csv')
+                if os.path.exists(macro_csv):
+                    try:
+                        df_canon = pd.read_csv(macro_csv, index_col=0, parse_dates=True)
+                        overlap = df_m.index.intersection(df_canon.index)
+                        if 'WPI_YoY' in df_canon.columns and len(overlap) > 0:
+                            df_m.loc[overlap, 'WPI_YoY'] = df_canon.loc[overlap, 'WPI_YoY']
+                        if 'WPI_MoM' in df_canon.columns and len(overlap) > 0:
+                            df_m.loc[overlap, 'WPI_MoM'] = df_canon.loc[overlap, 'WPI_MoM']
+                        if 'WPI_MoM_vs_MA3M' in df_canon.columns and len(overlap) > 0:
+                            df_m.loc[overlap, 'WPI_MoM_vs_MA3M'] = df_canon.loc[overlap, 'WPI_MoM_vs_MA3M']
+                    except Exception:
+                        pass
+
+                if 'WPI_YoY' in df_m.columns:
+                    if 'WPI_MoM' not in df_m.columns or df_m['WPI_MoM'].isna().sum() > len(df_m) * 0.5:
+                        df_m['WPI_MoM'] = (df_m['WPI_YoY'] - df_m['WPI_YoY'].shift(21)).bfill()
+                    else:
+                        df_m['WPI_MoM'] = df_m['WPI_MoM'].fillna((df_m['WPI_YoY'] - df_m['WPI_YoY'].shift(21)).bfill())
+                    df_m['WPI_MoM_vs_MA3M'] = (df_m['WPI_YoY'] - df_m['WPI_YoY'].rolling(63).mean()).bfill().fillna(0.0)
+                else:
+                    df_m['WPI_MoM_vs_MA3M'] = 0.0
+
+                df_m = df_m.ffill().bfill()
                 if target_index is not None:
                     df_m = df_m.reindex(target_index, method='ffill').bfill()
                 return df_m
@@ -238,6 +270,12 @@ def impute_macro_signals(df):
                 df_ref['drawdown'] = (df_ref['NIFTY'] - cum_max) / (cum_max + 1e-9)
             if 'YieldCurve' in df_ref.columns and 'GSecYield2' not in df_ref.columns:
                 df_ref['GSecYield2'] = df_ref['GSecYield10'] - df_ref['YieldCurve']
+            if 'CPI_MoM' not in df_ref.columns and 'CPI' in df_ref.columns:
+                df_ref['CPI_MoM'] = (df_ref['CPI'] - df_ref['CPI'].shift(21)).bfill()
+            if 'WPI_MoM' not in df_ref.columns and 'WPI' in df_ref.columns:
+                df_ref['WPI_MoM'] = (df_ref['WPI'] - df_ref['WPI'].shift(21)).bfill()
+            if 'WPI_MoM_vs_MA3M' not in df_ref.columns and 'WPI' in df_ref.columns:
+                df_ref['WPI_MoM_vs_MA3M'] = (df_ref['WPI'] - df_ref['WPI'].rolling(63).mean()).bfill()
 
             if all(c in df_ref.columns for c in feature_cols):
                 donor_pool = df_ref[feature_cols].dropna()
@@ -267,9 +305,16 @@ def impute_macro_signals(df):
     else:
         df[macro_cols] = df[macro_cols].ffill().bfill()
 
-    # Dynamically recompute derived features
-    df['YieldCurve'] = df['GSecYield10'] - df['GSecYield2']
+    # Dynamically recompute derived features and ensure no residual NaNs
+    if 'GSecYield10' in df.columns and 'GSecYield2' in df.columns:
+        df['YieldCurve'] = df['GSecYield10'] - df['GSecYield2']
+    elif 'YieldCurve' in df.columns and 'GSecYield10' in df.columns:
+        df['GSecYield2'] = df['GSecYield10'] - df['YieldCurve']
     df['RealRate']   = df['RepoRate'] - df['CPI']
+    if 'WPI_MoM_vs_MA3M' in df.columns and df['WPI_MoM_vs_MA3M'].isna().any():
+        df['WPI_MoM_vs_MA3M'] = df['WPI_MoM_vs_MA3M'].fillna((df['WPI'] - df['WPI'].rolling(63).mean()).bfill()).fillna(0.0)
+    for col in macro_cols:
+        df[col] = df[col].ffill().bfill()
     return df
 
 
@@ -649,7 +694,12 @@ def engineer_features(df):
     feat['cpi_yoy']         = df['CPI']
     feat['iip_yoy']         = df['IIP']
     feat['wpi_yoy']         = df['WPI']
-    feat['wpi_mom_vs_ma3m'] = df['WPI_MoM_vs_MA3M'] if 'WPI_MoM_vs_MA3M' in df.columns else (df['WPI'] - df['WPI'].rolling(63).mean()).bfill()
+    if 'WPI_MoM_vs_MA3M' in df.columns and df['WPI_MoM_vs_MA3M'].notna().sum() > len(df) * 0.5:
+        feat['wpi_mom_vs_ma3m'] = df['WPI_MoM_vs_MA3M'].ffill().bfill()
+    elif 'WPI' in df.columns:
+        feat['wpi_mom_vs_ma3m'] = (df['WPI'] - df['WPI'].rolling(63).mean()).bfill().ffill()
+    else:
+        feat['wpi_mom_vs_ma3m'] = 0.0
     feat['real_rate_mom']   = (df['RealRate'] - df['RealRate'].shift(21)).bfill()
     feat['real_rate']       = feat['real_rate_mom']
     clean = feat.dropna()
@@ -2357,7 +2407,7 @@ def plot_sector_rotation(result, port_ret, learned_sector_mix, out_dir):
                 pctdistance=0.75,
                 wedgeprops=dict(width=0.45, edgecolor='#0f0f11', lw=1.2)
             )
-            
+            ax_d.set_title(f'{regime} Mix', fontsize=9, color='#9ca3af')
 
     plt.tight_layout()
     fig.savefig(f'{out_dir}/fig7_sector_rotation.png', dpi=150, bbox_inches='tight',
@@ -2367,98 +2417,116 @@ def plot_sector_rotation(result, port_ret, learned_sector_mix, out_dir):
 
 
 def plot_new_macro_signals(result, out_dir):
-    """Fig 8: New macro features (yield curve, CPI, IIP, real rate, regime phase space)."""
-    fig = plt.figure(figsize=(18, 8))
-    fig.suptitle('NEW MACRO SIGNALS  ·  Yield Curve · CPI · IIP · Real Rate',
-                 fontsize=12, fontweight='bold', color='#f9fafb')
+    """Fig 8: New macro features (yield curve, CPI, WPI, IIP, real rate, regime phase space)."""
+    apply_dark_figure_style()
+
+    fig = plt.figure(figsize=(18, 8.5))
+    fig.suptitle('NEW MACRO SIGNALS  ·  Yield Curve · CPI · WPI · IIP · Real Rate',
+                 fontsize=12.5, fontweight='bold', color='#f9fafb', y=0.98)
     fig.patch.set_facecolor('#0a0a0d')
-    gs8 = gridspec.GridSpec(2, 3, figure=fig, hspace=0.45, wspace=0.35,
-                            left=0.06, right=0.97, top=0.88, bottom=0.06)
+    gs8 = gridspec.GridSpec(2, 3, figure=fig, hspace=0.38, wspace=0.26,
+                            left=0.05, right=0.98, top=0.92, bottom=0.06)
 
     def shade_regimes(ax):
         changes = [0] + list(np.where(result['Regime'].values[:-1] != result['Regime'].values[1:])[0]+1) + [len(result)]
         for i in range(len(changes)-1):
             reg = result['Regime'].iloc[changes[i]]
+            color = REGIME_COLORS.get(reg, '#3b82f6')
             ax.axvspan(result.index[changes[i]], result.index[changes[i+1]-1],
-                       alpha=0.09, color=REGIME_COLORS[reg])
+                       alpha=0.08, color=color)
+
+    legend_kwargs = dict(fontsize=7.5, framealpha=0.85, facecolor='#18181b', edgecolor='#374151', labelcolor='#e5e7eb')
 
     # 1. Yield curve (10Y-2Y)
-    ax = fig.add_subplot(gs8[0, 0])
-    ax.set_facecolor('#0f0f11')
-    shade_regimes(ax)
-    ax.plot(result.index, result['YieldCurve'], color='#a78bfa', lw=0.8)
-    ax.axhline(0, color='#ef4444', lw=0.7, ls='--', label='Inversion')
-    ax.fill_between(result.index, result['YieldCurve'], 0,
-                    where=result['YieldCurve'] < 0, color='#ef4444', alpha=0.3, label='Inverted')
-    ax.set_title('Yield Curve (10Y − 2Y G-Sec %)\n← Inversion = recession risk', fontsize=9, color='#9ca3af')
-    ax.set_ylabel('%', fontsize=8); ax.grid(True, lw=0.3)
-    ax.legend(fontsize=7, framealpha=0.3, facecolor='#0f0f11')
-    ax.set_xlim(result.index[0], result.index[-1])
+    ax1 = fig.add_subplot(gs8[0, 0])
+    ax1.set_facecolor('#0f0f11')
+    shade_regimes(ax1)
+    ax1.plot(result.index, result['YieldCurve'], color='#a78bfa', lw=1.1, label='Yield Curve (10Y−2Y)')
+    ax1.axhline(0, color='#ef4444', lw=0.8, ls='--', label='Inversion (0%)')
+    ax1.fill_between(result.index, result['YieldCurve'], 0,
+                     where=result['YieldCurve'] < 0, color='#ef4444', alpha=0.35, label='Inverted Spread')
+    ax1.set_title('Yield Curve (10Y − 2Y G-Sec %)\n← Inversion = recession risk', fontsize=9.5, color='#f3f4f6', fontweight='bold', pad=6)
+    ax1.set_ylabel('% Spread', fontsize=8.5, color='#9ca3af')
+    ax1.grid(True, lw=0.4, color='#1e1e28')
+    ax1.legend(loc='upper right', **legend_kwargs)
+    ax1.set_xlim(result.index[0], result.index[-1])
 
-    # 2. CPI & WPI Inflation (Month-on-Month)
-    ax = fig.add_subplot(gs8[0, 1])
-    ax.set_facecolor('#0f0f11')
-    shade_regimes(ax)
-    cpi_plot = result['CPI_MoM'] if 'CPI_MoM' in result.columns else result['CPI']
-    ax.plot(result.index, cpi_plot, color='#f59e0b', lw=0.9, label='CPI MoM')
-    if 'WPI_MoM' in result.columns:
-        ax.plot(result.index, result['WPI_MoM'], color='#38bdf8', lw=0.9, label='WPI MoM (GoI)')
-    elif 'WPI' in result.columns:
-        ax.plot(result.index, result['WPI'], color='#38bdf8', lw=0.9, label='WPI (GoI)')
-    ax.axhline(0.0, color='#9ca3af', lw=0.6, ls='--', alpha=0.7)
-    ax.set_title('CPI & WPI Inflation (% MoM)\nMonth-on-Month Price Changes', fontsize=9, color='#9ca3af')
-    ax.set_ylabel('% MoM', fontsize=8); ax.grid(True, lw=0.3)
-    ax.legend(fontsize=7, framealpha=0.3, facecolor='#0f0f11')
-    ax.set_xlim(result.index[0], result.index[-1])
+    # 2. CPI & WPI Inflation (% YoY Headline)
+    ax2 = fig.add_subplot(gs8[0, 1])
+    ax2.set_facecolor('#0f0f11')
+    shade_regimes(ax2)
+    if 'CPI' in result.columns and result['CPI'].notna().any():
+        ax2.plot(result.index, result['CPI'], color='#f59e0b', lw=1.2, label='CPI YoY (MoSPI)')
+    if 'WPI' in result.columns and result['WPI'].notna().any():
+        ax2.plot(result.index, result['WPI'], color='#38bdf8', lw=1.2, label='WPI YoY (DPIIT)')
+    ax2.axhline(4.0, color='#10b981', lw=0.8, ls=':', label='RBI Target (4.0%)')
+    ax2.axhline(0.0, color='#6b7280', lw=0.6, ls='--', alpha=0.7)
+    ax2.set_title('CPI & WPI Inflation (% YoY)\nOfficial MoSPI & DPIIT Headline Releases', fontsize=9.5, color='#f3f4f6', fontweight='bold', pad=6)
+    ax2.set_ylabel('% YoY', fontsize=8.5, color='#9ca3af')
+    ax2.grid(True, lw=0.4, color='#1e1e28')
+    ax2.legend(loc='upper right', **legend_kwargs)
+    ax2.set_xlim(result.index[0], result.index[-1])
 
     # 3. IIP (Industrial Production)
-    ax = fig.add_subplot(gs8[0, 2])
-    ax.set_facecolor('#0f0f11')
-    shade_regimes(ax)
-    ax.bar(result.index, result['IIP'],
-           color=[('#10b981' if v > 0 else '#ef4444') for v in result['IIP']], alpha=0.6, width=1)
-    ax.axhline(0, color='#9ca3af', lw=0.5)
-    ax.set_title('IIP YoY % (Industrial Production)\n> 0 = expansion', fontsize=9, color='#9ca3af')
-    ax.set_ylabel('%', fontsize=8); ax.grid(True, lw=0.3, axis='y')
-    ax.set_xlim(result.index[0], result.index[-1])
+    ax3 = fig.add_subplot(gs8[0, 2])
+    ax3.set_facecolor('#0f0f11')
+    shade_regimes(ax3)
+    ax3.bar(result.index, result['IIP'],
+            color=[('#10b981' if v > 0 else '#ef4444') for v in result['IIP']], alpha=0.7, width=1.2)
+    ax3.axhline(0, color='#6b7280', lw=0.6, ls='--')
+    ax3.set_title('IIP YoY % (Industrial Production)\n> 0 = expansion  ·  y-axis clipped for cyclical detail', fontsize=9.5, color='#f3f4f6', fontweight='bold', pad=6)
+    ax3.set_ylabel('% YoY', fontsize=8.5, color='#9ca3af')
+    ax3.grid(True, lw=0.4, color='#1e1e28', axis='y')
+    ax3.set_xlim(result.index[0], result.index[-1])
+    ax3.set_ylim(-35, 45)
 
-    # 4. Real policy rate (Repo + CPI)
-    ax = fig.add_subplot(gs8[1, 0])
-    ax.set_facecolor('#0f0f11')
-    shade_regimes(ax)
-    ax.plot(result.index, result['RepoRate'] - result['CPI'], color='#34d399', lw=0.8)
-    ax.axhline(0, color='#ef4444', lw=0.7, ls='--', label='Neutral (real rate = 0)')
-    ax.fill_between(result.index, result['RepoRate'] - result['CPI'], 0,
-                    where=(result['RepoRate'] - result['CPI'] < 0),
-                    color='#ef4444', alpha=0.2, label='Negative real rates')
-    ax.set_title('Real Policy Rate (Repo - CPI %)\n< 0 = accommodative / inflationary', fontsize=9, color='#9ca3af')
-    ax.set_ylabel('%', fontsize=8); ax.grid(True, lw=0.3)
-    ax.legend(fontsize=7, framealpha=0.3, facecolor='#0f0f11')
-    ax.set_xlim(result.index[0], result.index[-1])
+    # 4. Real policy rate (Repo - CPI)
+    ax4 = fig.add_subplot(gs8[1, 0])
+    ax4.set_facecolor('#0f0f11')
+    shade_regimes(ax4)
+    real_rate = result['RepoRate'] - result['CPI']
+    ax4.plot(result.index, real_rate, color='#34d399', lw=1.1, label='Real Rate (Repo − CPI)')
+    ax4.axhline(0, color='#ef4444', lw=0.8, ls='--', label='Neutral (0%)')
+    ax4.fill_between(result.index, real_rate, 0,
+                     where=(real_rate < 0),
+                     color='#ef4444', alpha=0.25, label='Negative Real Rate')
+    ax4.set_title('Real Policy Rate (Repo − CPI %)\n< 0 = accommodative / negative real rates', fontsize=9.5, color='#f3f4f6', fontweight='bold', pad=6)
+    ax4.set_ylabel('%', fontsize=8.5, color='#9ca3af')
+    ax4.grid(True, lw=0.4, color='#1e1e28')
+    ax4.legend(loc='lower right', **legend_kwargs)
+    ax4.set_xlim(result.index[0], result.index[-1])
 
     # 5. Box: macro means per regime
-    ax = fig.add_subplot(gs8[1, 1])
-    ax.set_facecolor('#0f0f11')
+    ax5 = fig.add_subplot(gs8[1, 1])
+    ax5.set_facecolor('#0f0f11')
     regimes_order = ['Bull', 'Bear', 'HighVol', 'Sideways']
-    macro_cols = ['YieldCurve', 'CPI_MoM', 'WPI_MoM', 'IIP'] if 'WPI_MoM' in result.columns else (
-        ['YieldCurve', 'CPI', 'WPI', 'IIP'] if 'WPI' in result.columns else ['YieldCurve', 'CPI', 'IIP']
-    )
-    label_map_macro = {'YieldCurve': 'YieldCurve', 'CPI_MoM': 'CPI MoM', 'WPI_MoM': 'WPI MoM', 'CPI': 'CPI', 'WPI': 'WPI', 'IIP': 'IIP'}
+    macro_cols = ['YieldCurve', 'CPI', 'WPI', 'IIP']
+    label_map_macro = {'YieldCurve': 'Yield Curve', 'CPI': 'CPI YoY', 'WPI': 'WPI YoY', 'IIP': 'IIP YoY'}
     x_pos = np.arange(len(regimes_order))
     w = 0.19
     line_colors = ['#a78bfa', '#f59e0b', '#38bdf8', '#34d399']
     for j, (col, lc) in enumerate(zip(macro_cols, line_colors)):
         means = [result.loc[result['Regime']==r, col].mean() for r in regimes_order]
-        ax.bar(x_pos + j*w, means, w, label=label_map_macro.get(col, col), color=lc, alpha=0.8)
-    ax.set_xticks(x_pos + w)
-    ax.set_xticklabels(regimes_order, fontsize=9)
-    ax.set_title('Mean Macro Signal\nby Regime', fontsize=9, color='#9ca3af')
-    ax.legend(fontsize=7, framealpha=0.3, facecolor='#0f0f11')
-    ax.grid(True, lw=0.3, axis='y')
+        rects = ax5.bar(x_pos + j*w, means, w, label=label_map_macro.get(col, col), color=lc, alpha=0.85)
+        for rect in rects:
+            height = rect.get_height()
+            va = 'bottom' if height >= 0 else 'top'
+            y_offset = 0.15 if height >= 0 else -0.4
+            ax5.annotate(f"{height:.1f}%",
+                         xy=(rect.get_x() + rect.get_width() / 2, height + y_offset),
+                         xytext=(0, 0), textcoords="offset points",
+                         ha='center', va=va, fontsize=6.8, color='#d1d5db')
+    ax5.set_xticks(x_pos + 1.5 * w)
+    ax5.set_xticklabels(regimes_order, fontsize=9, color='#e5e7eb', fontweight='bold')
+    ax5.set_title('Mean Macro Signal by Regime\nMacro Averages Across Decoded States', fontsize=9.5, color='#f3f4f6', fontweight='bold', pad=6)
+    ax5.set_ylabel('% Average', fontsize=8.5, color='#9ca3af')
+    ax5.legend(loc='upper right', **legend_kwargs)
+    ax5.grid(True, lw=0.4, color='#1e1e28', axis='y')
+    ax5.set_ylim(-1, 8.5)
 
     # 6. Regime Phase Space: India VIX vs 20d Realized Volatility
-    ax = fig.add_subplot(gs8[1, 2])
-    ax.set_facecolor('#0f0f11')
+    ax6 = fig.add_subplot(gs8[1, 2])
+    ax6.set_facecolor('#0f0f11')
 
     vol20 = result['Returns'].rolling(20).std() * np.sqrt(252) * 100
     plot_df = pd.DataFrame({
@@ -2475,48 +2543,53 @@ def plot_new_macro_signals(result, out_dir):
         order = vals.argsort()[::-1]
         vals, vecs = vals[order], vecs[:, order]
         theta = np.degrees(np.arctan2(*vecs[:, 0][::-1]))
-        w, h = 2 * n_std * np.sqrt(np.maximum(vals, 1e-6))
-        ell = mpatches.Ellipse(xy=(np.mean(x_data), np.mean(y_data)), width=w, height=h, angle=theta,
+        w_ell, h_ell = 2 * n_std * np.sqrt(np.maximum(vals, 1e-6))
+        ell = mpatches.Ellipse(xy=(np.mean(x_data), np.mean(y_data)), width=w_ell, height=h_ell, angle=theta,
                                edgecolor=color, facecolor=color, alpha=0.18, lw=1.5)
         axis.add_patch(ell)
 
     offsets = {
-        'Bull':     (8, -12),
-        'Sideways': (-65, 8),
-        'Bear':     (8, 6),
-        'HighVol':  (-55, 12),
+        'Bull':     (18, -8),
+        'Sideways': (-12, -26),
+        'Bear':     (14, 8),
+        'HighVol':  (-22, 26),
     }
 
     for reg in regimes_order:
         sub = plot_df[plot_df['Regime'] == reg]
         if len(sub) == 0: continue
         c = REGIME_COLORS[reg]
-        ax.scatter(sub['VIX'], sub['Vol20'], c=c, alpha=0.35, s=14, label=reg, edgecolors='none')
-        add_regime_ellipse(ax, sub['VIX'], sub['Vol20'], c, n_std=1.5)
+        ax6.scatter(sub['VIX'], sub['Vol20'], c=c, alpha=0.35, s=14, label=reg, edgecolors='none')
+        add_regime_ellipse(ax6, sub['VIX'], sub['Vol20'], c, n_std=1.5)
         mx, my = sub['VIX'].mean(), sub['Vol20'].mean()
-        ax.plot(mx, my, marker='*', markersize=11, color=c, markeredgecolor='#ffffff', markeredgewidth=0.8)
+        ax6.plot(mx, my, marker='*', markersize=11, color=c, markeredgecolor='#ffffff', markeredgewidth=0.8)
         dx, dy = offsets.get(reg, (8, 5))
         badge_text = f"{reg}\nVIX={mx:.1f} Vol={my:.1f}%"
-        ax.annotate(badge_text, (mx, my),
-                    textcoords='offset points', xytext=(dx, dy), fontsize=7.5,
-                    color=c, fontweight='bold',
-                    bbox=dict(boxstyle='round,pad=0.2', facecolor='#0f0f11', edgecolor=c, alpha=0.8, lw=0.6))
+        ax6.annotate(badge_text, (mx, my),
+                     textcoords='offset points', xytext=(dx, dy), fontsize=7.5,
+                     color=c, fontweight='bold',
+                     bbox=dict(boxstyle='round,pad=0.25', facecolor='#18181b', edgecolor=c, alpha=0.92, lw=0.8))
 
-    ax.axvline(18.0, color='#6b7280', lw=0.6, ls=':', label='VIX Median (18)')
-    ax.set_xlabel('India VIX (Implied Volatility)', fontsize=8, color='#9ca3af')
-    ax.set_ylabel('20d Realized Volatility (% ann)', fontsize=8, color='#9ca3af')
-    ax.set_title('Regime Phase Space: Implied vs Realized Vol\n★ Centroids  ·  1.5σ Gaussian Ellipses',
-                 fontsize=9, color='#f9fafb', fontweight='bold')
-    ax.legend(fontsize=7, framealpha=0.3, facecolor='#0f0f11', loc='lower right')
-    ax.grid(True, lw=0.3)
-    ax.set_xlim(8, 70)
-    ax.set_ylim(4, 75)
+    ax6.axvline(18.0, color='#6b7280', lw=0.6, ls=':', label='VIX Median (18)')
+    ax6.set_xlabel('India VIX (Implied Volatility)', fontsize=8.5, color='#9ca3af')
+    ax6.set_ylabel('20d Realized Volatility (% ann)', fontsize=8.5, color='#9ca3af')
+    ax6.set_title('Regime Phase Space: Implied vs Realized Vol\n★ Centroids  ·  1.5σ Gaussian Dispersion Ellipses',
+                  fontsize=9.5, color='#f3f4f6', fontweight='bold', pad=6)
+    ax6.legend(loc='lower right', **legend_kwargs)
+    ax6.grid(True, lw=0.4, color='#1e1e28')
+    ax6.set_xlim(8, 70)
+    ax6.set_ylim(4, 75)
 
-    plt.tight_layout()
-    fig.savefig(f'{out_dir}/fig8_new_macro_signals.png', dpi=150, bbox_inches='tight',
-                facecolor='#0a0a0d')
+    # Apply unified border color to all subplots
+    for a in [ax1, ax2, ax3, ax4, ax5, ax6]:
+        for spine in a.spines.values():
+            spine.set_color('#2a2a35')
+        a.tick_params(colors='#9ca3af', labelsize=8)
+
+    fig_path = os.path.join(out_dir, 'fig8_new_macro_signals.png')
+    fig.savefig(fig_path, dpi=160, bbox_inches='tight', facecolor='#0a0a0d')
     plt.close(fig)
-    print("✓ Saved: fig8_new_macro_signals.png")
+    print(f"✓ Saved: {fig_path}")
 
 
 def apply_dark_figure_style():

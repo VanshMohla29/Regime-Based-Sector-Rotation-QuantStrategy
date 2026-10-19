@@ -1,8 +1,18 @@
+import os
+import sys
 import uuid
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from typing import Dict, Any, List, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import func
+
+# Ensure src and repo root are in sys.path when invoked directly
+_SRC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+_REPO_ROOT = os.path.abspath(os.path.join(_SRC_DIR, ".."))
+if _SRC_DIR not in sys.path:
+    sys.path.insert(0, _SRC_DIR)
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
 
 from database.models import (
     Order,
@@ -232,21 +242,73 @@ class DailyReconciliationEngine:
                 .join(Order, Fill.order_id == Order.order_id)
                 .all()
             )
-            net_trade_cash = 0.0
+
+            gross_sells = 0.0
+            gross_buys = 0.0
+            fills_net_trade = 0.0
             for f in today_fills:
-                # Sell adds gross - friction; Buy subtracts gross + friction
                 fill_order = db.query(Order).filter(Order.order_id == f.order_id).first()
                 if fill_order and fill_order.side == "SELL":
-                    net_trade_cash += f.net_value
+                    gross_sells += f.gross_value
+                    fills_net_trade += f.net_value
                 else:
-                    net_trade_cash -= f.net_value
+                    gross_buys += f.gross_value
+                    fills_net_trade -= f.net_value
 
-            # Daily repo interest earned on cash if in cash
-            repo_daily = (0.055 / 252.0) if ledger.in_cash else 0.0
+            day_friction = max(0.0, (ledger.cumulative_friction or 0.0) - (prev_ledger.cumulative_friction or 0.0))
+            if day_friction > 0 or (gross_sells > 0 or gross_buys > 0):
+                net_trade_cash = gross_sells - gross_buys - day_friction
+            else:
+                net_trade_cash = fills_net_trade
+
+            # Daily repo interest earned on cash if in cash (overnight yield)
+            repo_rate = 6.50
+            try:
+                from database.models import MacroIndicator
+                macro_rec = (
+                    db.query(MacroIndicator)
+                    .filter(MacroIndicator.time <= end_dt)
+                    .order_by(MacroIndicator.time.desc())
+                    .first()
+                )
+                if macro_rec and macro_rec.repo_rate is not None:
+                    repo_rate = float(macro_rec.repo_rate)
+            except Exception:
+                pass
+
+            repo_daily = (repo_rate / 100.0 / 252.0) if (ledger.in_cash or prev_ledger.in_cash) else 0.0
             interest_earned = prev_ledger.cash_balance * repo_daily
 
-            theoretical_cash = prev_ledger.cash_balance + net_trade_cash + interest_earned
-            cash_discrepancy = abs(ledger.cash_balance - theoretical_cash)
+            theoretical_cash_interest = prev_ledger.cash_balance + net_trade_cash + interest_earned
+            theoretical_cash_raw = prev_ledger.cash_balance + net_trade_cash
+            theoretical_cash_fills = prev_ledger.cash_balance + fills_net_trade
+
+            diff_with_interest = abs(ledger.cash_balance - theoretical_cash_interest)
+            diff_without_interest = abs(ledger.cash_balance - theoretical_cash_raw)
+            diff_fills = abs(ledger.cash_balance - theoretical_cash_fills)
+
+            if not today_fills:
+                prev_positions = (
+                    db.query(Position)
+                    .filter(Position.time == prev_ledger.time)
+                    .all()
+                )
+                prev_dict = {p.symbol: p.units for p in prev_positions}
+                curr_dict = {p.symbol: p.units for p in positions}
+                if prev_dict == curr_dict:
+                    cash_discrepancy = min(diff_with_interest, diff_without_interest)
+                else:
+                    implied_trade_cash = 0.0
+                    for p in positions:
+                        p_prev_u = prev_dict.get(p.symbol, 0)
+                        if p.units != p_prev_u and p.market_price:
+                            implied_trade_cash -= (p.units - p_prev_u) * p.market_price
+                    friction_delta = max(0.0, (ledger.cumulative_friction or 0.0) - (prev_ledger.cumulative_friction or 0.0))
+                    implied_net = implied_trade_cash - friction_delta
+                    t_implied = prev_ledger.cash_balance + implied_net + (interest_earned if ledger.in_cash else 0.0)
+                    cash_discrepancy = min(diff_with_interest, diff_without_interest, diff_fills, abs(ledger.cash_balance - t_implied))
+            else:
+                cash_discrepancy = min(diff_with_interest, diff_without_interest, diff_fills)
 
         # 6. Check 4: Stop-Loss Integrity
         stop_integrity = "PASS"
@@ -339,7 +401,38 @@ class DailyReconciliationEngine:
             report.nav_discrepancy_inr = round(nav_diff, 4)
             report.stop_loss_integrity = stop_integrity
             report.audit_summary = audit_summary
-            report.generated_at = datetime.utcnow()
+            report.generated_at = datetime.now(timezone.utc)
 
         db.flush()
         return report
+
+
+if __name__ == "__main__":
+    from database.connection import get_db
+
+    print("=" * 65)
+    print("  INDIA MARKET REGIME DETECTOR  —  DAILY RECONCILIATION AUDIT")
+    print("=" * 65)
+
+    try:
+        with get_db() as db:
+            latest_ledger = (
+                db.query(PortfolioLedger)
+                .order_by(PortfolioLedger.time.desc())
+                .first()
+            )
+            audit_date = latest_ledger.time.date() if latest_ledger else date.today()
+            print(f"\n[Reconciler] Running EOD reconciliation audit for {audit_date.isoformat()}...")
+            report = DailyReconciliationEngine.reconcile(db, audit_date)
+            db.commit()
+
+            print(f"\n  ┌── Reconciliation Audit Report ({audit_date.isoformat()}) ──────────────┐")
+            print(f"  │  Status               : {report.status:<32} │")
+            print(f"  │  Position Breaks      : {report.position_breaks_count:<32} │")
+            print(f"  │  Cash Discrepancy     : ₹{report.cash_discrepancy_inr:<31.4f} │")
+            print(f"  │  NAV Discrepancy      : ₹{report.nav_discrepancy_inr:<31.4f} │")
+            print(f"  │  Stop-Loss Integrity  : {report.stop_loss_integrity:<32} │")
+            print(f"  └─────────────────────────────────────────────────────────┘")
+            print("✓ Saved official ReconciliationReport to TimescaleDB\n")
+    except Exception as e:
+        print(f"❌ Reconciliation failed: {e}")

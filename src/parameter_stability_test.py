@@ -166,7 +166,7 @@ def perform_parameter_stability_analysis(df_res, df_sec, learned_mix):
 
     ma_filter_20 = (nifty_prices > nifty_prices.rolling(STOP_REENTRY_MA, min_periods=1).mean()).values
 
-    stop_dd_grid = [-0.02, -0.04, -0.06, -0.08, -0.10, -0.12, -0.14, -0.16, -0.18, -0.20]
+    stop_dd_grid = [-0.01, -0.02, -0.04, -0.06, -0.08, -0.10, -0.12, -0.14, -0.16, -0.18, -0.20]
     cooldown_grid = [1, 2, 3, 5, 7, 10, 15, 20]
 
     n_stops = len(stop_dd_grid)
@@ -550,7 +550,7 @@ def save_summary_data(res, out_dir):
     """
     Saves CSV and JSON summary tables of parameter stability test.
     """
-    stop_labels = [f'{int(s * 100)}%' for s in res['stop_dd_grid']]
+    stop_labels = [f'{int(round(s * 100))}%' for s in res['stop_dd_grid']]
     cd_labels = [f'{c}d' for c in res['cooldown_grid']]
 
     # Flatten Grid 1 to DataFrame
@@ -558,7 +558,7 @@ def save_summary_data(res, out_dir):
     for i, s_dd in enumerate(res['stop_dd_grid']):
         for j, cd in enumerate(res['cooldown_grid']):
             rows.append({
-                'stop_loss_dd_pct': s_dd * 100,
+                'stop_loss_dd_pct': round(s_dd * 100, 1),
                 'cooldown_days': cd,
                 'sharpe_ratio': round(res['sharpe_matrix'][i, j], 3),
                 'ann_return_pct': round(res['ann_ret_matrix'][i, j], 2),
