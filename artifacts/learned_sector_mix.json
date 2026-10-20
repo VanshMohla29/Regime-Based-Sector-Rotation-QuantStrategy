@@ -12,31 +12,31 @@
   "Bear": {
     "BANKBEES": 0.0,
     "ITBEES": 0.0,
-    "PHARMABEES": 0.364,
+    "PHARMABEES": 0.247,
+    "AUTOBEES": 0.4,
+    "METALIETF": 0.353,
+    "MOREALTY": 0.0,
+    "CPSEETF": 0.0,
+    "INFRABEES": 0.0
+  },
+  "HighVol": {
+    "BANKBEES": 0.0,
+    "ITBEES": 0.4,
+    "PHARMABEES": 0.0,
     "AUTOBEES": 0.0,
     "METALIETF": 0.4,
     "MOREALTY": 0.0,
-    "CPSEETF": 0.0,
-    "INFRABEES": 0.236
-  },
-  "HighVol": {
-    "BANKBEES": 0.2,
-    "ITBEES": 0.0,
-    "PHARMABEES": 0.0,
-    "AUTOBEES": 0.0,
-    "METALIETF": 0.0,
-    "MOREALTY": 0.4,
-    "CPSEETF": 0.4,
+    "CPSEETF": 0.2,
     "INFRABEES": 0.0
   },
   "Sideways": {
     "BANKBEES": 0.0,
     "ITBEES": 0.0,
     "PHARMABEES": 0.0,
-    "AUTOBEES": 0.4,
-    "METALIETF": 0.0,
-    "MOREALTY": 0.2,
-    "CPSEETF": 0.4,
+    "AUTOBEES": 0.0,
+    "METALIETF": 0.4,
+    "MOREALTY": 0.4,
+    "CPSEETF": 0.2,
     "INFRABEES": 0.0
   }
 }

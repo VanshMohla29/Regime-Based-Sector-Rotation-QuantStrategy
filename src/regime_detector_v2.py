@@ -79,7 +79,7 @@ REGIME_COLORS = {
 
 
 # Minimum holding period (trading days) to prevent whipsaw
-MIN_HOLD_DAYS = 14
+MIN_HOLD_DAYS = 5
 
 # Transaction cost parameters
 TC_STT       = 0.001   # 0.10% STT on sell-side (equity delivery)
