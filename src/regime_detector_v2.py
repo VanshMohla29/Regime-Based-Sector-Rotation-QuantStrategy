@@ -28,7 +28,7 @@ warnings.filterwarnings('ignore')
 
 from hmmlearn.hmm import GaussianHMM
 from sklearn.preprocessing import QuantileTransformer
-from sklearn.cluster import KMeans
+from sklearn.cluster import KMeans, SpectralClustering
 from sklearn.impute import KNNImputer
 from scipy import stats
 from scipy.optimize import minimize
@@ -742,33 +742,68 @@ def select_features_for_hmm(feat, n_states=4):
 
 
 # ══════════════════════════════════════════════════════════════════════
-# 3. K-MEANS EM INITIALIZATION
+# 3. SPECTRAL CLUSTERING EM INITIALIZATION
 # ══════════════════════════════════════════════════════════════════════
 
-def kmeans_em_init(X_scaled, n_states=4, seed=42):
+def spectral_em_init(X_scaled, n_states=4, seed=42):
     """
-    Smart Initialization for HMM EM (Baum-Welch) step using K-Means.
+    Smart Initialization for HMM EM (Baum-Welch) step using Spectral Clustering.
+    Identifies non-linear graph manifold structure in macro feature space,
+    providing well-separated component centroids and covariances.
     Prevents EM from trapping in poor local minima or degenerate components.
+    Falls back to K-Means if SpectralClustering encounters disconnected components.
     """
     n_samples, n_features = X_scaled.shape
-    kmeans = KMeans(n_clusters=n_states, n_init=10, random_state=seed).fit(X_scaled)
-    
-    init_means = kmeans.cluster_centers_
-    init_covars = np.zeros((n_states, n_features))
-    labels = kmeans.labels_
-    for k in range(n_states):
-        cluster_points = X_scaled[labels == k]
-        if len(cluster_points) > 1:
-            cov = np.var(cluster_points, axis=0) + 1e-3
-        else:
-            cov = np.ones(n_features)
-        init_covars[k] = np.maximum(cov, 1e-3)
-        
+    try:
+        n_neighbors = min(30, max(5, n_samples // 15))
+        spec = SpectralClustering(
+            n_clusters=n_states,
+            affinity='nearest_neighbors',
+            n_neighbors=n_neighbors,
+            n_init=3,
+            random_state=seed,
+            assign_labels='kmeans'
+        ).fit(X_scaled)
+        labels = spec.labels_
+        unique_labels = np.unique(labels)
+        if len(unique_labels) < n_states:
+            raise ValueError(f"Spectral clustering produced only {len(unique_labels)} clusters, expected {n_states}")
+
+        init_means = np.zeros((n_states, n_features))
+        init_covars = np.zeros((n_states, n_features))
+        for k in range(n_states):
+            pts = X_scaled[labels == k]
+            if len(pts) > 1:
+                init_means[k] = pts.mean(axis=0)
+                cov = np.var(pts, axis=0) + 1e-3
+            else:
+                init_means[k] = X_scaled[k % n_samples]
+                cov = np.ones(n_features)
+            init_covars[k] = np.maximum(cov, 1e-3)
+    except Exception:
+        # Graceful fallback to K-Means if graph construction encounters issues
+        kmeans = KMeans(n_clusters=n_states, n_init=10, random_state=seed).fit(X_scaled)
+        init_means = kmeans.cluster_centers_
+        init_covars = np.zeros((n_states, n_features))
+        labels = kmeans.labels_
+        for k in range(n_states):
+            cluster_points = X_scaled[labels == k]
+            if len(cluster_points) > 1:
+                cov = np.var(cluster_points, axis=0) + 1e-3
+            else:
+                cov = np.ones(n_features)
+            init_covars[k] = np.maximum(cov, 1e-3)
+
     init_transmat = np.full((n_states, n_states), 0.02 / (n_states - 1))
     np.fill_diagonal(init_transmat, 0.98)
     init_startprob = np.ones(n_states) / n_states
-    
+
     return init_startprob, init_transmat, init_means, init_covars
+
+
+def kmeans_em_init(X_scaled, n_states=4, seed=42):
+    """Backwards-compatible alias redirecting to spectral_em_init."""
+    return spectral_em_init(X_scaled, n_states=n_states, seed=seed)
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -843,17 +878,18 @@ def regularize_transmat(transmat, alpha=1.0, max_diag=0.97, min_offdiag=0.005):
 
     return reg
 
-def train_hmm(X_scaled, n_states=4, n_iter=10000, n_init=200):
+def train_hmm(X_scaled, n_states=4, n_iter=10000, n_init=20):
     """
     Fits Gaussian HMM using Expectation-Maximization (EM / Baum-Welch) algorithm.
-    Integrates K-Means smart EM initialization, covariance floor regularization,
-    and multiple restarts to maximize Log-Likelihood convergence.
+    Integrates Spectral Clustering smart EM initialization, covariance floor regularization,
+    and restarts to maximize Log-Likelihood convergence.
     Applies Dirichlet prior regularization post-training to prevent absorbing states.
     """
     best_ll, best_model = -np.inf, None
-    print(f"Fitting {n_states}-state Gaussian HMM with EM ({n_iter} max iters, {n_init} restarts)...")
+    restarts = min(n_init, 10) if n_init > 10 else n_init
+    print(f"Fitting {n_states}-state Gaussian HMM with EM ({n_iter} max iters, {restarts} Spectral restarts)...")
     
-    for seed in range(n_init):
+    for seed in range(restarts):
         try:
             m = GaussianHMM(
                 n_components=n_states,
@@ -866,7 +902,7 @@ def train_hmm(X_scaled, n_states=4, n_iter=10000, n_init=200):
                 verbose=False
             )
             
-            sp, tm, mu, cv = kmeans_em_init(X_scaled, n_states=n_states, seed=seed)
+            sp, tm, mu, cv = spectral_em_init(X_scaled, n_states=n_states, seed=seed)
             m.startprob_ = sp
             m.transmat_  = tm
             m.means_     = mu
@@ -2635,7 +2671,7 @@ def main():
 
     # ── 4. Train final HMM ───────────────────────────────────────────
     print(f"\n[4] Training {n_states}-state HMM (full dataset)...")
-    model  = train_hmm(X_scaled, n_states=n_states, n_iter=10000, n_init=200)
+    model  = train_hmm(X_scaled, n_states=n_states, n_iter=10000, n_init=10)
 
     # ── 5. Decode regimes ────────────────────────────────────────────
     print("\n[5] Decoding regimes (Viterbi + Forward-Backward)...")
